@@ -379,4 +379,140 @@ export async function curriculumRoutes(app: FastifyInstance): Promise<void> {
       }
     }
   );
+
+  // 2.8 Ambil daftar soal yang terpasang di level tertentu
+  app.get<{
+    Params: { id: string };
+  }>(
+    '/api/admin/curriculum/levels/:id/questions',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string' } },
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!requireAdmin(req, reply)) return;
+
+      try {
+        const questions = CurriculumService.getLevelQuestions(req.params.id);
+        return reply.send({
+          success: true,
+          data: questions,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Gagal mengambil soal level';
+        return reply.status(400).send({ success: false, message });
+      }
+    }
+  );
+
+  // 2.9 Ambil daftar kandidat soal dari bank soal untuk level ini
+  app.get<{
+    Params: { id: string };
+  }>(
+    '/api/admin/curriculum/levels/:id/candidates',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string' } },
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!requireAdmin(req, reply)) return;
+
+      try {
+        const result = CurriculumService.getCandidateQuestionsForLevel(req.params.id);
+        return reply.send({
+          success: true,
+          ...result,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Gagal mengambil kandidat soal level';
+        return reply.status(400).send({ success: false, message });
+      }
+    }
+  );
+
+  // 2.10 Tambahkan soal ke level
+  app.post<{
+    Params: { id: string };
+    Body: { question_ids: string[] };
+  }>(
+    '/api/admin/curriculum/levels/:id/questions',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string' } },
+        },
+        body: {
+          type: 'object',
+          required: ['question_ids'],
+          properties: {
+            question_ids: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!requireAdmin(req, reply)) return;
+
+      try {
+        const result = CurriculumService.addQuestionsToLevel(req.params.id, req.body.question_ids);
+        return reply.send({
+          success: true,
+          message: `${result.count} soal berhasil dimasukkan ke level.`,
+          data: result,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Gagal menambahkan soal ke level';
+        return reply.status(400).send({ success: false, message });
+      }
+    }
+  );
+
+  // 2.11 Keluarkan soal dari level
+  app.delete<{
+    Params: { id: string; questionId: string };
+  }>(
+    '/api/admin/curriculum/levels/:id/questions/:questionId',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id', 'questionId'],
+          properties: {
+            id: { type: 'string' },
+            questionId: { type: 'string' },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!requireAdmin(req, reply)) return;
+
+      try {
+        CurriculumService.removeQuestionFromLevel(req.params.id, req.params.questionId);
+        return reply.send({
+          success: true,
+          message: 'Soal berhasil dikeluarkan dari level.',
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Gagal mengeluarkan soal dari level';
+        return reply.status(400).send({ success: false, message });
+      }
+    }
+  );
 }
+

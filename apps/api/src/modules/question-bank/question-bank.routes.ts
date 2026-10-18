@@ -54,6 +54,7 @@ export async function questionBankRoutes(app: FastifyInstance): Promise<void> {
       semester?: number;
       status?: QuestionStatus;
       topic_id?: string;
+      level_id?: string;
       page?: number;
       limit?: number;
     };
@@ -68,6 +69,7 @@ export async function questionBankRoutes(app: FastifyInstance): Promise<void> {
             semester: { type: 'integer' },
             status: { type: 'string', enum: ['draft', 'approved', 'active', 'archived'] },
             topic_id: { type: 'string' },
+            level_id: { type: 'string' },
             page: { type: 'integer', minimum: 1 },
             limit: { type: 'integer', minimum: 1, maximum: 100 },
           },
@@ -199,4 +201,46 @@ export async function questionBankRoutes(app: FastifyInstance): Promise<void> {
       return reply.send(exportedJson);
     }
   );
+
+  // 10. Atur penempatan level dan topik untuk soal
+  app.post<{
+    Params: { id: string };
+    Body: { topic_id?: string | null; level_id?: string | null };
+  }>(
+    '/api/admin/questions/:id/assign-level',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string' } },
+        },
+        body: {
+          type: 'object',
+          properties: {
+            topic_id: { type: ['string', 'null'] },
+            level_id: { type: ['string', 'null'] },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      try {
+        const result = QuestionBankService.assignQuestionLevel(
+          req.params.id,
+          req.body.topic_id ?? null,
+          req.body.level_id ?? null
+        );
+        return reply.send({
+          success: true,
+          message: 'Penempatan level soal berhasil diperbarui',
+          data: result,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Gagal mengatur level soal';
+        return reply.status(400).send({ success: false, message });
+      }
+    }
+  );
 }
+

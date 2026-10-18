@@ -20,6 +20,11 @@ interface QuestionItem {
   options: Array<{ id: string; text: string }>;
   correct_answer: string;
   explanation: string;
+  topic_id?: string | null;
+  topic_name?: string | null;
+  level_id?: string | null;
+  level_name?: string | null;
+  level_number?: number | null;
 }
 
 interface PlayerItem {
@@ -121,6 +126,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const [levelFilter, setLevelFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
+
+  // Atur Level Soal State (Bank Soal -> Level)
+  const [assignLevelQuestion, setAssignLevelQuestion] = useState<QuestionItem | null>(null);
+  const [selectedTopicIdForAssign, setSelectedTopicIdForAssign] = useState<string>('');
+  const [selectedLevelIdForAssign, setSelectedLevelIdForAssign] = useState<string>('');
+  const [isSavingAssignLevel, setIsSavingAssignLevel] = useState(false);
+  const [assignLevelMsg, setAssignLevelMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Kelola Soal per Level State (Jalur & Kurikulum -> Soal Level)
+  const [managingLevel, setManagingLevel] = useState<{ level: AdminLevel; topic: AdminTopic } | null>(null);
+  const [levelQuestionsTab, setLevelQuestionsTab] = useState<'assigned' | 'add'>('assigned');
+  const [levelQuestionsList, setLevelQuestionsList] = useState<QuestionItem[]>([]);
+  const [candidateQuestionsList, setCandidateQuestionsList] = useState<QuestionItem[]>([]);
+  const [isLoadingLevelQuestions, setIsLoadingLevelQuestions] = useState(false);
+  const [levelQuestionActionMsg, setLevelQuestionActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [candidateSearchQuery, setCandidateSearchQuery] = useState('');
 
   // Import JSON State
   const [importJsonText, setImportJsonText] = useState('');
@@ -465,6 +486,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
       const data = await res.json();
       if (data.success) {
         fetchQuestions();
+        fetchCurriculum();
       } else {
         alert(data.message || 'Gagal mengubah status soal');
       }
@@ -473,6 +495,129 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
       alert('Terjadi kesalahan jaringan');
     }
   };
+
+  // Handle Buka Modal Atur Level Soal
+  const handleOpenAssignLevel = (q: QuestionItem) => {
+    setAssignLevelQuestion(q);
+    setSelectedTopicIdForAssign(q.topic_id || '');
+    setSelectedLevelIdForAssign(q.level_id || '');
+    setAssignLevelMsg(null);
+  };
+
+  // Handle Simpan Penempatan Level Soal
+  const handleSaveQuestionLevel = async (customTopicId?: string | null, customLevelId?: string | null) => {
+    if (!assignLevelQuestion) return;
+    setIsSavingAssignLevel(true);
+    setAssignLevelMsg(null);
+    try {
+      const topicToSave = customTopicId !== undefined ? customTopicId : (selectedTopicIdForAssign || null);
+      const levelToSave = customLevelId !== undefined ? customLevelId : (selectedLevelIdForAssign || null);
+
+      const res = await fetch(`/api/admin/questions/${assignLevelQuestion.id || assignLevelQuestion.question_id}/assign-level`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          topic_id: topicToSave,
+          level_id: levelToSave,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAssignLevelMsg({ type: 'success', text: 'Penempatan level soal berhasil diperbarui!' });
+        fetchQuestions();
+        fetchCurriculum();
+        setTimeout(() => {
+          setAssignLevelQuestion(null);
+        }, 1000);
+      } else {
+        setAssignLevelMsg({ type: 'error', text: data.message || 'Gagal menyimpan level soal' });
+      }
+    } catch (err) {
+      console.error(err);
+      setAssignLevelMsg({ type: 'error', text: 'Terjadi kesalahan jaringan' });
+    } finally {
+      setIsSavingAssignLevel(false);
+    }
+  };
+
+  // Handle Kelola Soal Level (Fetch list & candidates)
+  const fetchLevelQuestionsData = async (levelId: string) => {
+    setIsLoadingLevelQuestions(true);
+    try {
+      const [resAssigned, resCandidates] = await Promise.all([
+        fetch(`/api/admin/curriculum/levels/${levelId}/questions`, { credentials: 'include' }),
+        fetch(`/api/admin/curriculum/levels/${levelId}/candidates`, { credentials: 'include' }),
+      ]);
+      const dataAssigned = await resAssigned.json();
+      const dataCandidates = await resCandidates.json();
+      if (dataAssigned.success) {
+        setLevelQuestionsList(dataAssigned.data || []);
+      }
+      if (dataCandidates.success) {
+        setCandidateQuestionsList(dataCandidates.candidates || []);
+      }
+    } catch (err) {
+      console.error('Gagal mengambil data soal level:', err);
+    } finally {
+      setIsLoadingLevelQuestions(false);
+    }
+  };
+
+  const handleOpenManageLevelQuestions = (lvl: AdminLevel, topic: AdminTopic) => {
+    setManagingLevel({ level: lvl, topic });
+    setLevelQuestionsTab('assigned');
+    setLevelQuestionActionMsg(null);
+    setCandidateSearchQuery('');
+    fetchLevelQuestionsData(lvl.id);
+  };
+
+  // Handle Masukkan Soal ke Level
+  const handleAddQuestionToLevel = async (questionId: string) => {
+    if (!managingLevel) return;
+    try {
+      const res = await fetch(`/api/admin/curriculum/levels/${managingLevel.level.id}/questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ question_ids: [questionId] }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setLevelQuestionActionMsg({ type: 'success', text: 'Soal berhasil dimasukkan ke level!' });
+        fetchLevelQuestionsData(managingLevel.level.id);
+        fetchCurriculum();
+        fetchQuestions();
+      } else {
+        setLevelQuestionActionMsg({ type: 'error', text: data.message || 'Gagal memasukkan soal' });
+      }
+    } catch (err) {
+      setLevelQuestionActionMsg({ type: 'error', text: 'Terjadi kesalahan jaringan' });
+    }
+  };
+
+  // Handle Keluarkan Soal dari Level
+  const handleRemoveQuestionFromLevel = async (questionId: string) => {
+    if (!managingLevel) return;
+    try {
+      const res = await fetch(`/api/admin/curriculum/levels/${managingLevel.level.id}/questions/${questionId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (data.success) {
+        setLevelQuestionActionMsg({ type: 'success', text: 'Soal berhasil dikeluarkan dari level.' });
+        fetchLevelQuestionsData(managingLevel.level.id);
+        fetchCurriculum();
+        fetchQuestions();
+      } else {
+        setLevelQuestionActionMsg({ type: 'error', text: data.message || 'Gagal mengeluarkan soal' });
+      }
+    } catch (err) {
+      setLevelQuestionActionMsg({ type: 'error', text: 'Terjadi kesalahan jaringan' });
+    }
+  };
+
 
   // Handle Validasi JSON Bank Soal
   const handleValidateJson = async () => {
@@ -2320,6 +2465,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                                   <td style={{ padding: '10px 12px', textAlign: 'right' }}>
                                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
                                       <button
+                                        onClick={() => handleOpenManageLevelQuestions(lvl, topic)}
+                                        style={{
+                                          padding: '4px 8px',
+                                          backgroundColor: '#EFF6FF',
+                                          border: '1px solid #BFDBFE',
+                                          color: '#1D4ED8',
+                                          borderRadius: '4px',
+                                          fontSize: '0.6875rem',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        Kelola Soal 📝
+                                      </button>
+                                      <button
                                         onClick={() => {
                                           setParentTopicForLevel(topic);
                                           setEditingLevel(lvl);
@@ -3029,6 +3189,62 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
 
                           {/* 3. Pertanyaan & Opsi */}
                           <td style={{ padding: '14px 18px', verticalAlign: 'top' }}>
+                            {/* Info Level & Topik Soal */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                              {q.level_name ? (
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '3px 8px',
+                                    backgroundColor: '#EFF6FF',
+                                    border: '1px solid #BFDBFE',
+                                    borderRadius: '6px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    color: '#1D4ED8',
+                                  }}
+                                >
+                                  🎯 Level {q.level_number}: {q.level_name} ({q.topic_name})
+                                </span>
+                              ) : q.topic_name ? (
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '3px 8px',
+                                    backgroundColor: '#F3F4F6',
+                                    border: '1px solid #E5E7EB',
+                                    borderRadius: '6px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600,
+                                    color: '#4B5563',
+                                  }}
+                                >
+                                  📚 Topik: {q.topic_name}
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '3px 8px',
+                                    backgroundColor: '#FFFBEB',
+                                    border: '1px solid #FDE68A',
+                                    borderRadius: '6px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600,
+                                    color: '#B45309',
+                                  }}
+                                >
+                                  ⚪ Belum diatur ke level
+                                </span>
+                              )}
+                            </div>
+
                             <div style={{ fontWeight: 700, color: '#1E293B', fontSize: '0.9375rem', marginBottom: '6px' }}>
                               {q.question}
                             </div>
@@ -3122,7 +3338,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
 
                           {/* 5. Aksi Manajemen */}
                           <td style={{ padding: '14px 18px', verticalAlign: 'top', textAlign: 'right' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end', width: '100%' }}>
+                              <button
+                                onClick={() => handleOpenAssignLevel(q)}
+                                style={{
+                                  padding: '5px 12px',
+                                  backgroundColor: '#EEF2FF',
+                                  color: '#4F46E5',
+                                  border: '1px solid #C7D2FE',
+                                  borderRadius: '6px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  width: '100%',
+                                  textAlign: 'center',
+                                }}
+                              >
+                                Atur Level 🎯
+                              </button>
+
                               {q.status === 'draft' && (
                                 <button
                                   onClick={() => handleUpdateStatus(q.question_id, 'approve')}
@@ -3135,6 +3369,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                                     fontSize: '0.75rem',
                                     fontWeight: 700,
                                     cursor: 'pointer',
+                                    width: '100%',
+                                    textAlign: 'center',
                                   }}
                                 >
                                   Setujui Soal ✓
@@ -3153,9 +3389,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                                     fontSize: '0.75rem',
                                     fontWeight: 700,
                                     cursor: 'pointer',
+                                    width: '100%',
+                                    textAlign: 'center',
                                   }}
                                 >
                                   Aktifkan ke Game 🚀
+                                </button>
+                              )}
+
+                              {q.status === 'archived' && (
+                                <button
+                                  onClick={() => handleUpdateStatus(q.question_id, 'activate')}
+                                  style={{
+                                    padding: '5px 12px',
+                                    backgroundColor: '#16A34A',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    width: '100%',
+                                    textAlign: 'center',
+                                  }}
+                                >
+                                  Aktifkan Kembali 🟢
                                 </button>
                               )}
 
@@ -3171,6 +3429,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                                     fontSize: '0.75rem',
                                     fontWeight: 600,
                                     cursor: 'pointer',
+                                    width: '100%',
+                                    textAlign: 'center',
                                   }}
                                 >
                                   Arsipkan 📦
@@ -4353,7 +4613,700 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
           </div>
         </div>
       )}
+
+      {/* ========================================================
+          MODAL ATUR LEVEL & TOPIK SOAL (Bank Soal -> Level)
+          ======================================================== */}
+      {assignLevelQuestion && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100000,
+            padding: '20px',
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '560px',
+              backgroundColor: '#FFFFFF',
+              borderRadius: '16px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '16px 20px',
+                borderBottom: '1px solid #E2E8F0',
+                backgroundColor: '#F8FAFC',
+              }}
+            >
+              <div>
+                <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1E293B', margin: 0 }}>
+                  🎯 Atur Penempatan Level Soal
+                </h3>
+                <span style={{ fontSize: '0.75rem', color: '#64748B' }}>
+                  Hubungkan soal ini ke level tertentu dalam jalur petualangan belajar
+                </span>
+              </div>
+              <button
+                onClick={() => setAssignLevelQuestion(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.25rem',
+                  cursor: 'pointer',
+                  color: '#94A3B8',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Isi */}
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Info Soal */}
+              <div
+                style={{
+                  padding: '12px 14px',
+                  backgroundColor: '#F1F5F9',
+                  borderRadius: '10px',
+                  border: '1px solid #CBD5E1',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ fontWeight: 800, color: '#2563EB', fontFamily: 'monospace', fontSize: '0.8125rem' }}>
+                    {assignLevelQuestion.question_id}
+                  </span>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>
+                    {assignLevelQuestion.education_level.replace('_', ' ')} • Semester {assignLevelQuestion.semester}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#1E293B', lineHeight: 1.4 }}>
+                  {assignLevelQuestion.question}
+                </div>
+                <div style={{ marginTop: '8px', fontSize: '0.75rem', color: '#64748B' }}>
+                  Posisi saat ini:{' '}
+                  {assignLevelQuestion.level_name ? (
+                    <strong style={{ color: '#1D4ED8' }}>
+                      Level {assignLevelQuestion.level_number}: {assignLevelQuestion.level_name} ({assignLevelQuestion.topic_name})
+                    </strong>
+                  ) : assignLevelQuestion.topic_name ? (
+                    <strong style={{ color: '#475569' }}>Topik: {assignLevelQuestion.topic_name}</strong>
+                  ) : (
+                    <em>Belum diatur</em>
+                  )}
+                </div>
+              </div>
+
+              {/* Status Pesan */}
+              {assignLevelMsg && (
+                <div
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    backgroundColor: assignLevelMsg.type === 'success' ? '#DCFCE7' : '#FEE2E2',
+                    color: assignLevelMsg.type === 'success' ? '#15803D' : '#991B1B',
+                    fontSize: '0.8125rem',
+                    fontWeight: 700,
+                  }}
+                >
+                  {assignLevelMsg.text}
+                </div>
+              )}
+
+              {/* Form Pemilihan Level */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                  Pilih Level Petualangan Tujuan:
+                </label>
+                <select
+                  value={selectedLevelIdForAssign}
+                  onChange={(e) => {
+                    const chosenLevelId = e.target.value;
+                    setSelectedLevelIdForAssign(chosenLevelId);
+                    if (chosenLevelId) {
+                      for (const t of curriculumTopics) {
+                        const matchLvl = t.levels?.find((l) => l.id === chosenLevelId);
+                        if (matchLvl) {
+                          setSelectedTopicIdForAssign(t.id);
+                          break;
+                        }
+                      }
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1.5px solid #CBD5E1',
+                    fontSize: '0.875rem',
+                    backgroundColor: '#FFFFFF',
+                    fontWeight: 600,
+                  }}
+                >
+                  <option value="">-- Tidak Dipasang ke Level Spesifik (Hanya Topik) --</option>
+                  {curriculumTopics
+                    .filter(
+                      (t) =>
+                        t.education_level === assignLevelQuestion.education_level &&
+                        t.semester === assignLevelQuestion.semester
+                    )
+                    .map((t) => (
+                      <optgroup key={t.id} label={`📚 ${t.name}`}>
+                        {t.levels && t.levels.length > 0 ? (
+                          t.levels.map((lvl) => (
+                            <option key={lvl.id} value={lvl.id}>
+                              🎯 Level {lvl.level_number}: {lvl.name} ({lvl.total_questions || 0} soal)
+                            </option>
+                          ))
+                        ) : (
+                          <option disabled value="">
+                            (Belum ada level di topik ini)
+                          </option>
+                        )}
+                      </optgroup>
+                    ))}
+                </select>
+              </div>
+
+              {/* Pemilihan Topik Jika Tanpa Level Khusus */}
+              {!selectedLevelIdForAssign && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                    Atau Tetapkan ke Topik Kurikulum Saja:
+                  </label>
+                  <select
+                    value={selectedTopicIdForAssign}
+                    onChange={(e) => setSelectedTopicIdForAssign(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #CBD5E1',
+                      fontSize: '0.875rem',
+                      backgroundColor: '#FFFFFF',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <option value="">-- Tanpa Topik (Hanya Jenjang & Semester) --</option>
+                    {curriculumTopics
+                      .filter(
+                        (t) =>
+                          t.education_level === assignLevelQuestion.education_level &&
+                          t.semester === assignLevelQuestion.semester
+                      )
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          📚 {t.name}
+                        </option>
+                      ))}
+                  </select>
+                  <span style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '4px', display: 'block' }}>
+                    Soal yang memiliki topik namun tanpa level khusus dapat diambil oleh game engine sebagai soal pendukung topik.
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '14px 20px',
+                borderTop: '1px solid #E2E8F0',
+                backgroundColor: '#F8FAFC',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => handleSaveQuestionLevel(null, null)}
+                disabled={isSavingAssignLevel}
+                style={{
+                  padding: '8px 14px',
+                  backgroundColor: '#FEF2F2',
+                  border: '1px solid #FECACA',
+                  borderRadius: '8px',
+                  fontSize: '0.8125rem',
+                  fontWeight: 700,
+                  color: '#DC2626',
+                  cursor: 'pointer',
+                }}
+              >
+                Lepas dari Level
+              </button>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => setAssignLevelQuestion(null)}
+                  disabled={isSavingAssignLevel}
+                  style={{
+                    padding: '8px 14px',
+                    backgroundColor: '#FFFFFF',
+                    border: '1px solid #CBD5E1',
+                    borderRadius: '8px',
+                    fontSize: '0.8125rem',
+                    fontWeight: 700,
+                    color: '#475569',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveQuestionLevel()}
+                  disabled={isSavingAssignLevel}
+                  style={{
+                    padding: '8px 18px',
+                    backgroundColor: '#2563EB',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '0.8125rem',
+                    fontWeight: 800,
+                    color: 'white',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isSavingAssignLevel ? 'Menyimpan...' : 'Simpan Level 💾'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODAL KELOLA SOAL LEVEL (Jalur & Kurikulum -> Soal Level)
+          ======================================================== */}
+      {managingLevel && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100000,
+            padding: '24px',
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '920px',
+              maxHeight: '90vh',
+              backgroundColor: '#FFFFFF',
+              borderRadius: '16px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header Modal */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '16px 24px',
+                borderBottom: '1px solid #E2E8F0',
+                backgroundColor: '#F8FAFC',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      backgroundColor: '#EFF6FF',
+                      color: '#1D4ED8',
+                      fontWeight: 800,
+                      fontSize: '0.875rem',
+                    }}
+                  >
+                    {managingLevel.level.level_number}
+                  </span>
+                  <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1E293B', margin: 0 }}>
+                    Kelola Soal: {managingLevel.level.name}
+                  </h3>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '4px' }}>
+                  Topik: <strong>{managingLevel.topic.name}</strong> •{' '}
+                  {managingLevel.topic.education_level.replace('_', ' ')} Semester {managingLevel.topic.semester} •
+                  Target: <strong>⭐ {managingLevel.level.required_xp} XP</strong>
+                </div>
+              </div>
+              <button
+                onClick={() => setManagingLevel(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.25rem',
+                  cursor: 'pointer',
+                  color: '#94A3B8',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Navigasi Tab Internal Modal */}
+            <div
+              style={{
+                display: 'flex',
+                borderBottom: '1px solid #E2E8F0',
+                backgroundColor: '#FFFFFF',
+                padding: '0 24px',
+                gap: '8px',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setLevelQuestionsTab('assigned')}
+                style={{
+                  padding: '12px 16px',
+                  border: 'none',
+                  borderBottom: levelQuestionsTab === 'assigned' ? '2.5px solid #2563EB' : '2.5px solid transparent',
+                  backgroundColor: 'transparent',
+                  color: levelQuestionsTab === 'assigned' ? '#2563EB' : '#64748B',
+                  fontWeight: levelQuestionsTab === 'assigned' ? 800 : 600,
+                  fontSize: '0.875rem',
+                  cursor: 'pointer',
+                }}
+              >
+                📋 Soal Terpasang ({levelQuestionsList.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setLevelQuestionsTab('add')}
+                style={{
+                  padding: '12px 16px',
+                  border: 'none',
+                  borderBottom: levelQuestionsTab === 'add' ? '2.5px solid #2563EB' : '2.5px solid transparent',
+                  backgroundColor: 'transparent',
+                  color: levelQuestionsTab === 'add' ? '#2563EB' : '#64748B',
+                  fontWeight: levelQuestionsTab === 'add' ? 800 : 600,
+                  fontSize: '0.875rem',
+                  cursor: 'pointer',
+                }}
+              >
+                ➕ Tambah Soal dari Bank Soal ({candidateQuestionsList.length})
+              </button>
+            </div>
+
+            {/* Pesan Feedback */}
+            {levelQuestionActionMsg && (
+              <div
+                style={{
+                  margin: '12px 24px 0',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  backgroundColor: levelQuestionActionMsg.type === 'success' ? '#DCFCE7' : '#FEE2E2',
+                  color: levelQuestionActionMsg.type === 'success' ? '#15803D' : '#991B1B',
+                  fontSize: '0.8125rem',
+                  fontWeight: 700,
+                }}
+              >
+                {levelQuestionActionMsg.text}
+              </div>
+            )}
+
+            {/* Isi Tab */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
+              {isLoadingLevelQuestions ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>
+                  Memuat data soal level...
+                </div>
+              ) : levelQuestionsTab === 'assigned' ? (
+                /* TAB 1: SOAL TERPASANG */
+                levelQuestionsList.length === 0 ? (
+                  <div
+                    style={{
+                      padding: '40px 20px',
+                      textAlign: 'center',
+                      backgroundColor: '#F8FAFC',
+                      borderRadius: '12px',
+                      border: '1.5px dashed #CBD5E1',
+                    }}
+                  >
+                    <div style={{ fontSize: '2rem', marginBottom: '8px' }}>📝</div>
+                    <h4 style={{ margin: 0, fontWeight: 800, color: '#1E293B', fontSize: '1rem' }}>
+                      Belum Ada Soal Khusus di Level Ini
+                    </h4>
+                    <p style={{ margin: '6px 0 16px', color: '#64748B', fontSize: '0.8125rem', maxWidth: '480px', marginInline: 'auto' }}>
+                      Saat anak memainkan level ini, game engine akan otomatis mengambil soal dari bank soal topik & jenjang yang sama. Anda juga dapat memasukkan soal-soal spesifik ke level ini.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setLevelQuestionsTab('add')}
+                      style={{
+                        padding: '8px 16px',
+                        backgroundColor: '#2563EB',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontSize: '0.8125rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ➕ Tambah Soal ke Level Ini
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {levelQuestionsList.map((q, idx) => (
+                      <div
+                        key={q.id || q.question_id}
+                        style={{
+                          padding: '12px 16px',
+                          borderRadius: '10px',
+                          border: '1px solid #E2E8F0',
+                          backgroundColor: '#FFFFFF',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '14px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', flex: 1 }}>
+                          <span
+                            style={{
+                              padding: '2px 6px',
+                              backgroundColor: '#EFF6FF',
+                              borderRadius: '4px',
+                              fontWeight: 800,
+                              fontSize: '0.6875rem',
+                              color: '#1D4ED8',
+                            }}
+                          >
+                            #{idx + 1}
+                          </span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                              <span style={{ fontWeight: 800, color: '#2563EB', fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                                {q.question_id}
+                              </span>
+                              <span
+                                style={{
+                                  padding: '1px 6px',
+                                  borderRadius: '999px',
+                                  fontSize: '0.6875rem',
+                                  fontWeight: 800,
+                                  backgroundColor: q.status === 'active' ? '#DCFCE7' : q.status === 'approved' ? '#E0F2FE' : '#FEF3C7',
+                                  color: q.status === 'active' ? '#15803D' : q.status === 'approved' ? '#0369A1' : '#B45309',
+                                }}
+                              >
+                                {q.status}
+                              </span>
+                            </div>
+                            <div style={{ fontWeight: 700, color: '#1E293B', fontSize: '0.875rem' }}>
+                              {q.question}
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '6px', flexWrap: 'wrap' }}>
+                              {q.options?.map((opt) => (
+                                <span
+                                  key={opt.id}
+                                  style={{
+                                    fontSize: '0.75rem',
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    backgroundColor: opt.id === q.correct_answer ? '#DCFCE7' : '#F8FAFC',
+                                    color: opt.id === q.correct_answer ? '#15803D' : '#64748B',
+                                    fontWeight: opt.id === q.correct_answer ? 800 : 500,
+                                    border: opt.id === q.correct_answer ? '1px solid #86EFAC' : '1px solid #E2E8F0',
+                                  }}
+                                >
+                                  {opt.id}. {opt.text}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveQuestionFromLevel(q.question_id || q.id)}
+                          style={{
+                            padding: '6px 12px',
+                            backgroundColor: '#FEF2F2',
+                            color: '#DC2626',
+                            border: '1px solid #FECACA',
+                            borderRadius: '6px',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Keluarkan ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : (
+                /* TAB 2: TAMBAH SOAL DARI BANK SOAL */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input
+                      type="text"
+                      placeholder="Cari pertanyaan atau kode soal..."
+                      value={candidateSearchQuery}
+                      onChange={(e) => setCandidateSearchQuery(e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: '9px 14px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #CBD5E1',
+                        fontSize: '0.8125rem',
+                      }}
+                    />
+                    <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>
+                      Menampilkan {candidateQuestionsList.filter((c) =>
+                        !candidateSearchQuery ||
+                        c.question.toLowerCase().includes(candidateSearchQuery.toLowerCase()) ||
+                        c.question_id.toLowerCase().includes(candidateSearchQuery.toLowerCase())
+                      ).length} soal kandidat
+                    </span>
+                  </div>
+
+                  {candidateQuestionsList.length === 0 ? (
+                    <div style={{ padding: '30px', textAlign: 'center', color: '#64748B', backgroundColor: '#F8FAFC', borderRadius: '8px' }}>
+                      Tidak ada soal kandidat yang cocok pada jenjang {managingLevel.topic.education_level.replace('_', ' ')} Semester {managingLevel.topic.semester}.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {candidateQuestionsList
+                        .filter(
+                          (c) =>
+                            !candidateSearchQuery ||
+                            c.question.toLowerCase().includes(candidateSearchQuery.toLowerCase()) ||
+                            c.question_id.toLowerCase().includes(candidateSearchQuery.toLowerCase())
+                        )
+                        .map((q) => (
+                          <div
+                            key={q.id || q.question_id}
+                            style={{
+                              padding: '10px 14px',
+                              borderRadius: '8px',
+                              border: '1px solid #E2E8F0',
+                              backgroundColor: '#FFFFFF',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '12px',
+                            }}
+                          >
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
+                                <span style={{ fontWeight: 800, color: '#2563EB', fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                                  {q.question_id}
+                                </span>
+                                {q.topic_name && (
+                                  <span style={{ fontSize: '0.6875rem', color: '#475569', backgroundColor: '#F1F5F9', padding: '1px 5px', borderRadius: '4px' }}>
+                                    {q.topic_name}
+                                  </span>
+                                )}
+                                <span
+                                  style={{
+                                    padding: '1px 5px',
+                                    borderRadius: '999px',
+                                    fontSize: '0.6875rem',
+                                    fontWeight: 800,
+                                    backgroundColor: q.status === 'active' ? '#DCFCE7' : q.status === 'approved' ? '#E0F2FE' : '#FEF3C7',
+                                    color: q.status === 'active' ? '#15803D' : q.status === 'approved' ? '#0369A1' : '#B45309',
+                                  }}
+                                >
+                                  {q.status}
+                                </span>
+                              </div>
+                              <div style={{ fontWeight: 600, color: '#1E293B', fontSize: '0.8125rem' }}>
+                                {q.question}
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleAddQuestionToLevel(q.question_id || q.id)}
+                              style={{
+                                padding: '6px 12px',
+                                backgroundColor: '#EFF6FF',
+                                color: '#1D4ED8',
+                                border: '1px solid #BFDBFE',
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              + Masukkan ke Level
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer Modal */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                padding: '12px 24px',
+                borderTop: '1px solid #E2E8F0',
+                backgroundColor: '#F8FAFC',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setManagingLevel(null)}
+                style={{
+                  padding: '8px 18px',
+                  backgroundColor: '#0F172A',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '0.8125rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Selesai & Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   );
 };
+

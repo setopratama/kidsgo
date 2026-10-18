@@ -101,12 +101,21 @@ export class GameEngineService {
     }
 
     // 3. Ambil soal yang berstatus 'active' (Soal 'draft' TIDAK BOLEH disajikan)
+    // Prioritas 1: Soal yang secara spesifik di-assign ke level_id ini
     let candidateRows = db.prepare(`
       SELECT * FROM questions 
-      WHERE status = 'active' AND education_level = ? AND semester = ? AND topic_id = ?
-    `).all(levelInfo.education_level, levelInfo.semester, levelInfo.topic_id) as Record<string, unknown>[];
+      WHERE status = 'active' AND level_id = ?
+    `).all(levelInfo.id) as Record<string, unknown>[];
 
-    // Fallback: Jika soal spesifik topik belum ada, gunakan soal aktif jenjang & semester ini
+    // Prioritas 2: Soal dari topik yang sama jika belum ada soal khusus level
+    if (candidateRows.length === 0) {
+      candidateRows = db.prepare(`
+        SELECT * FROM questions 
+        WHERE status = 'active' AND education_level = ? AND semester = ? AND topic_id = ?
+      `).all(levelInfo.education_level, levelInfo.semester, levelInfo.topic_id) as Record<string, unknown>[];
+    }
+
+    // Prioritas 3: Fallback ke soal aktif jenjang & semester ini
     if (candidateRows.length === 0) {
       candidateRows = db.prepare(`
         SELECT * FROM questions 

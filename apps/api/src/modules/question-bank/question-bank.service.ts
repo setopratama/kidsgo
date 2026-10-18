@@ -317,6 +317,7 @@ export class QuestionBankService {
     semester?: number;
     status?: QuestionStatus;
     topic_id?: string;
+    level_id?: string;
     page?: number;
     limit?: number;
   }) {
@@ -325,7 +326,12 @@ export class QuestionBankService {
     const limit = Math.min(100, Math.max(1, filters.limit || 20));
     const offset = (page - 1) * limit;
 
-    let baseQuery = 'FROM questions q WHERE 1=1';
+    let baseQuery = `
+      FROM questions q
+      LEFT JOIN topics t ON q.topic_id = t.id
+      LEFT JOIN levels l ON q.level_id = l.id
+      WHERE 1=1
+    `;
     const params: (string | number)[] = [];
 
     if (filters.education_level) {
@@ -344,10 +350,19 @@ export class QuestionBankService {
       baseQuery += ' AND q.topic_id = ?';
       params.push(filters.topic_id);
     }
+    if (filters.level_id) {
+      baseQuery += ' AND q.level_id = ?';
+      params.push(filters.level_id);
+    }
 
     const countRow = db.prepare(`SELECT COUNT(*) as total ${baseQuery}`).get(...params) as { total: number };
     const items = db
-      .prepare(`SELECT q.* ${baseQuery} ORDER BY q.created_at DESC LIMIT ? OFFSET ?`)
+      .prepare(`
+        SELECT q.*, t.name as topic_name, l.name as level_name, l.level_number
+        ${baseQuery}
+        ORDER BY q.created_at DESC
+        LIMIT ? OFFSET ?
+      `)
       .all(...params, limit, offset) as Record<string, unknown>[];
 
     const formatted = items.map((item) => ({
@@ -373,9 +388,10 @@ export class QuestionBankService {
   static getQuestionDetail(questionIdOrId: string) {
     const db = getDb();
     const item = db.prepare(`
-      SELECT q.*, t.name as topic_name 
+      SELECT q.*, t.name as topic_name, l.name as level_name, l.level_number 
       FROM questions q
       LEFT JOIN topics t ON q.topic_id = t.id
+      LEFT JOIN levels l ON q.level_id = l.id
       WHERE q.id = ? OR q.question_id = ?
     `).get(questionIdOrId, questionIdOrId) as Record<string, unknown> | undefined;
 
@@ -389,7 +405,7 @@ export class QuestionBankService {
   }
 
   /**
-   * Transisi status soal: draft -> approved, approved -> active, active -> archived
+   * Transisi status soal: draft -> approved, approved -> active, active -> archived, archived -> active / approved
    */
   static updateQuestionStatus(questionId: string, targetStatus: QuestionStatus) {
     const db = getDb();
@@ -407,7 +423,7 @@ export class QuestionBankService {
       draft: ['approved', 'archived'],
       approved: ['active', 'draft', 'archived'],
       active: ['archived', 'approved'],
-      archived: ['draft', 'approved'],
+      archived: ['active', 'approved', 'draft'],
     };
 
     if (!allowedTransitions[q.status]?.includes(targetStatus)) {
@@ -418,6 +434,35 @@ export class QuestionBankService {
     db.prepare('UPDATE questions SET status = ?, updated_at = ? WHERE id = ?').run(targetStatus, now, q.id);
 
     return { id: q.id, status: targetStatus };
+  }
+
+  /**
+   * Atur penempatan level dan topik untuk satu soal
+   */
+  static assignQuestionLevel(questionId: string, topicId: string | null, levelId: string | null) {
+    const db = getDb();
+    const q = db.prepare('SELECT id FROM questions WHERE id = ? OR question_id = ?').get(questionId, questionId) as { id: string } | undefined;
+    if (!q) {
+      throw new Error('Soal tidak ditemukan');
+    }
+
+    let finalTopicId = topicId;
+    if (levelId) {
+      const lvl = db.prepare('SELECT id, topic_id FROM levels WHERE id = ?').get(levelId) as { id: string; topic_id: string } | undefined;
+      if (!lvl) {
+        throw new Error('Level tidak ditemukan');
+      }
+      finalTopicId = lvl.topic_id;
+    }
+
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE questions 
+      SET topic_id = ?, level_id = ?, updated_at = ?
+      WHERE id = ?
+    `).run(finalTopicId, levelId, now, q.id);
+
+    return { id: q.id, topic_id: finalTopicId, level_id: levelId };
   }
 
   /**

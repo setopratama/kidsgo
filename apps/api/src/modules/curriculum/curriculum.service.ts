@@ -289,4 +289,130 @@ export class CurriculumService {
 
     return true;
   }
+
+  /**
+   * Mengambil daftar soal yang terpasang di level tertentu
+   */
+  static getLevelQuestions(levelId: string) {
+    const db = getDb();
+    const rows = db
+      .prepare(`
+        SELECT q.*, t.name as topic_name, l.name as level_name, l.level_number
+        FROM questions q
+        LEFT JOIN topics t ON q.topic_id = t.id
+        LEFT JOIN levels l ON q.level_id = l.id
+        WHERE q.level_id = ?
+        ORDER BY q.created_at ASC
+      `)
+      .all(levelId) as Record<string, unknown>[];
+
+    return rows.map((r) => ({
+      ...r,
+      options: JSON.parse(r.options_json as string),
+      tags: JSON.parse(r.tags_json as string),
+    }));
+  }
+
+  /**
+   * Mengambil kandidat soal dari bank soal yang sesuai jenjang dan semester untuk dimasukkan ke level
+   */
+  static getCandidateQuestionsForLevel(levelId: string) {
+    const db = getDb();
+    const levelInfo = db
+      .prepare(`
+        SELECT l.*, t.education_level, t.semester, t.id as topic_id, t.name as topic_name
+        FROM levels l
+        JOIN topics t ON l.topic_id = t.id
+        WHERE l.id = ?
+      `)
+      .get(levelId) as {
+        id: string;
+        level_number: number;
+        name: string;
+        education_level: string;
+        semester: number;
+        topic_id: string;
+        topic_name: string;
+      } | undefined;
+
+    if (!levelInfo) {
+      throw new Error('Level tidak ditemukan');
+    }
+
+    const rows = db
+      .prepare(`
+        SELECT q.*, t.name as topic_name, l.name as level_name, l.level_number
+        FROM questions q
+        LEFT JOIN topics t ON q.topic_id = t.id
+        LEFT JOIN levels l ON q.level_id = l.id
+        WHERE q.education_level = ? AND q.semester = ?
+          AND (q.level_id IS NULL OR q.level_id != ?)
+        ORDER BY (q.topic_id = ?) DESC, q.created_at DESC
+        LIMIT 100
+      `)
+      .all(
+        levelInfo.education_level,
+        levelInfo.semester,
+        levelInfo.id,
+        levelInfo.topic_id
+      ) as Record<string, unknown>[];
+
+    return {
+      level: levelInfo,
+      candidates: rows.map((r) => ({
+        ...r,
+        options: JSON.parse(r.options_json as string),
+        tags: JSON.parse(r.tags_json as string),
+      })),
+    };
+  }
+
+  /**
+   * Menambahkan/mengaitkan satu atau banyak soal ke level tertentu
+   */
+  static addQuestionsToLevel(levelId: string, questionIds: string[]) {
+    if (!questionIds || questionIds.length === 0) {
+      return { success: true, count: 0 };
+    }
+
+    const db = getDb();
+    const levelInfo = db
+      .prepare('SELECT l.id, l.topic_id FROM levels l WHERE l.id = ?')
+      .get(levelId) as { id: string; topic_id: string } | undefined;
+
+    if (!levelInfo) {
+      throw new Error('Level tidak ditemukan');
+    }
+
+    const now = new Date().toISOString();
+    const updateStmt = db.prepare(`
+      UPDATE questions 
+      SET level_id = ?, topic_id = ?, updated_at = ?
+      WHERE id = ? OR question_id = ?
+    `);
+
+    db.transaction(() => {
+      for (const qId of questionIds) {
+        updateStmt.run(levelInfo.id, levelInfo.topic_id, now, qId, qId);
+      }
+    })();
+
+    return { success: true, count: questionIds.length };
+  }
+
+  /**
+   * Mengeluarkan satu soal dari level (unassign level)
+   */
+  static removeQuestionFromLevel(levelId: string, questionId: string) {
+    const db = getDb();
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE questions 
+      SET level_id = NULL, updated_at = ?
+      WHERE (id = ? OR question_id = ?) AND level_id = ?
+    `).run(now, questionId, questionId, levelId);
+
+    return { success: true };
+  }
 }
+

@@ -220,6 +220,29 @@ describe('Curriculum & Question Bank Engine', () => {
     assert.strictEqual(row.status, 'active');
   });
 
+  test('Question status transition: active -> archived -> active (unarchive)', async () => {
+    // 1. Archive
+    const archiveRes = await app.inject({
+      method: 'POST',
+      url: `/api/admin/questions/${testQuestionId}/archive`,
+    });
+    assert.strictEqual(archiveRes.statusCode, 200);
+
+    const db = getDb();
+    let row = db.prepare('SELECT status FROM questions WHERE question_id = ?').get(testQuestionId) as { status: string };
+    assert.strictEqual(row.status, 'archived');
+
+    // 2. Unarchive back to active
+    const reactivateRes = await app.inject({
+      method: 'POST',
+      url: `/api/admin/questions/${testQuestionId}/activate`,
+    });
+    assert.strictEqual(reactivateRes.statusCode, 200);
+
+    row = db.prepare('SELECT status FROM questions WHERE question_id = ?').get(testQuestionId) as { status: string };
+    assert.strictEqual(row.status, 'active');
+  });
+
   test('GET /api/admin/questions/export exports valid schema_version 1.0 JSON', async () => {
     const res = await app.inject({
       method: 'GET',
@@ -347,4 +370,73 @@ describe('Curriculum & Question Bank Engine', () => {
     });
     assert.strictEqual(deleteTopicRes.statusCode, 200);
   });
+
+  test('Admin Assign Level to Question and Manage Questions per Level', async () => {
+    // Login as admin
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/login',
+      payload: { pin: '123456' },
+    });
+    const setCookie = loginRes.headers['set-cookie'] as string;
+    const cookieVal = setCookie.split(';')[0];
+    const authHeaders = { cookie: cookieVal };
+
+    const db = getDb();
+    const levelRow = db.prepare('SELECT id FROM levels LIMIT 1').get() as { id: string };
+    assert.ok(levelRow);
+
+    // 1. Assign level via POST /api/admin/questions/:id/assign-level
+    const assignRes = await app.inject({
+      method: 'POST',
+      url: `/api/admin/questions/${testQuestionId}/assign-level`,
+      payload: { level_id: levelRow.id },
+    });
+    assert.strictEqual(assignRes.statusCode, 200);
+
+    // 2. GET level questions
+    const lvlQuestionsRes = await app.inject({
+      method: 'GET',
+      url: `/api/admin/curriculum/levels/${levelRow.id}/questions`,
+      headers: authHeaders,
+    });
+    assert.strictEqual(lvlQuestionsRes.statusCode, 200);
+    const lvlQuestionsBody = JSON.parse(lvlQuestionsRes.payload);
+    assert.ok(lvlQuestionsBody.data.some((q: any) => q.question_id === testQuestionId));
+
+    // 3. GET candidates
+    const candidatesRes = await app.inject({
+      method: 'GET',
+      url: `/api/admin/curriculum/levels/${levelRow.id}/candidates`,
+      headers: authHeaders,
+    });
+    assert.strictEqual(candidatesRes.statusCode, 200);
+
+    // 4. Remove question from level
+    const removeRes = await app.inject({
+      method: 'DELETE',
+      url: `/api/admin/curriculum/levels/${levelRow.id}/questions/${testQuestionId}`,
+      headers: authHeaders,
+    });
+    assert.strictEqual(removeRes.statusCode, 200);
+
+    // Verify it is removed from level
+    const verifyLvlQRes = await app.inject({
+      method: 'GET',
+      url: `/api/admin/curriculum/levels/${levelRow.id}/questions`,
+      headers: authHeaders,
+    });
+    const verifyBody = JSON.parse(verifyLvlQRes.payload);
+    assert.ok(!verifyBody.data.some((q: any) => q.question_id === testQuestionId));
+
+    // 5. Add back to level via POST /api/admin/curriculum/levels/:id/questions
+    const addBackRes = await app.inject({
+      method: 'POST',
+      url: `/api/admin/curriculum/levels/${levelRow.id}/questions`,
+      headers: authHeaders,
+      payload: { question_ids: [testQuestionId] },
+    });
+    assert.strictEqual(addBackRes.statusCode, 200);
+  });
 });
+
