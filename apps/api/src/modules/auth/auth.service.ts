@@ -392,4 +392,30 @@ export class AuthService {
     const tokenHash = this.hashToken(rawToken);
     db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
   }
+
+  /**
+   * Daftar pemain terdaftar untuk panel admin
+   */
+  static listPlayers(): Array<{
+    id: string;
+    nickname: string;
+    avatar: string;
+    grade: string;
+    current_xp: number;
+    created_at: string;
+  }> {
+    const db = getDb();
+    return db
+      .prepare('SELECT id, nickname, avatar, grade, current_xp, created_at FROM players ORDER BY created_at DESC LIMIT 50')
+      .all() as Array<{
+      id: string;
+      nickname: string;
+      avatar: string;
+      grade: string;
+      current_xp: number;
+      created_at: string;
+    }>;
+  }
 }
+
+

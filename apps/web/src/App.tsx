@@ -8,6 +8,7 @@ import { LeaderboardTab } from './components/LeaderboardTab';
 import { PlaySession } from './components/PlaySession';
 import { AuthModal } from './components/AuthModal';
 import { LandingView } from './components/LandingView';
+import { AdminDashboard } from './components/AdminDashboard';
 import { PlayerProfile, EducationLevel } from '@kidsgo/shared';
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
   const [player, setPlayer] = useState<PlayerProfile | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [streak] = useState(3);
   const [isOnline, setIsOnline] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
@@ -139,6 +141,7 @@ export default function App() {
             setAuthModalMode('register');
             setIsAuthModalOpen(true);
           }}
+          onOpenAdmin={() => setIsAdminOpen(true)}
         />
 
         {/* Modal Login / Register PIN Anak */}
@@ -148,6 +151,11 @@ export default function App() {
             onSuccess={handleAuthSuccess}
             onClose={() => setIsAuthModalOpen(false)}
           />
+        )}
+
+        {/* Modal / Panel Dashboard Admin */}
+        {isAdminOpen && (
+          <AdminDashboard onClose={() => setIsAdminOpen(false)} />
         )}
       </div>
     );
@@ -221,6 +229,11 @@ export default function App() {
           onSuccess={handleAuthSuccess}
           onClose={() => setIsAuthModalOpen(false)}
         />
+      )}
+
+      {/* Modal / Panel Dashboard Admin */}
+      {isAdminOpen && (
+        <AdminDashboard onClose={() => setIsAdminOpen(false)} />
       )}
     </div>
   );

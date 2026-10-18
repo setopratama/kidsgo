@@ -295,7 +295,18 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // 9. Logout Admin
+  // 9. Daftar Akun Anak untuk Admin
+  app.get('/api/admin/players', async (req, reply) => {
+    const token = req.cookies[ADMIN_COOKIE];
+    const admin = token ? AuthService.getAdminByToken(token) : null;
+    if (!admin) {
+      return reply.status(401).send({ success: false, message: 'Akses ditolak.' });
+    }
+    const players = AuthService.listPlayers();
+    return reply.send({ success: true, players });
+  });
+
+  // 10. Logout Admin
   app.post('/api/admin/auth/logout', async (req, reply) => {
     const token = req.cookies[ADMIN_COOKIE];
     if (token) {
@@ -305,3 +316,4 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ success: true, message: 'Admin keluar.' });
   });
 }
+

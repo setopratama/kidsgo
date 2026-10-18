@@ -5,12 +5,14 @@ interface LandingViewProps {
   isOnline: boolean;
   onOpenLogin: () => void;
   onOpenRegister: () => void;
+  onOpenAdmin?: () => void;
 }
 
 export const LandingView: React.FC<LandingViewProps> = ({
   isOnline,
   onOpenLogin,
   onOpenRegister,
+  onOpenAdmin,
 }) => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: 'var(--color-canvas)' }}>
@@ -271,14 +273,31 @@ export const LandingView: React.FC<LandingViewProps> = ({
           </div>
         </section>
 
-        {/* 5. Catatan Footer */}
-        <footer style={{ textAlign: 'center', padding: '16px 0 32px 0', color: 'var(--color-muted)' }}>
+        {/* 5. Catatan Footer & Akses Admin */}
+        <footer style={{ textAlign: 'center', padding: '16px 0 32px 0', color: 'var(--color-muted)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
           <p style={{ fontSize: '0.75rem', fontWeight: 600 }}>
             KidsGo! — Platform Belajar Anak Indonesia
           </p>
-          <p style={{ fontSize: '0.6875rem', marginTop: '4px' }}>
+          <p style={{ fontSize: '0.6875rem' }}>
             Versi MVP • Matematika TK s/d SD 6
           </p>
+          {onOpenAdmin && (
+            <button
+              onClick={onOpenAdmin}
+              style={{
+                marginTop: '10px',
+                background: 'none',
+                border: '1px dashed var(--color-border)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '6px 14px',
+                fontSize: '0.75rem',
+                color: 'var(--color-muted)',
+                cursor: 'pointer',
+              }}
+            >
+              ⚙️ Portal Guru & Orang Tua (Admin)
+            </button>
+          )}
         </footer>
       </main>
     </div>
