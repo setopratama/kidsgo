@@ -418,8 +418,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
             </div>
 
             {loginError && (
-              <div style={{ color: 'var(--color-danger)', fontSize: '0.8125rem', fontWeight: 700 }}>
-                {loginError}
+              <div
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: loginError.includes('terkunci')
+                    ? 'var(--color-danger-soft)'
+                    : 'var(--color-warning-soft)',
+                  border: loginError.includes('terkunci')
+                    ? '1.5px solid var(--color-danger)'
+                    : '1px solid #EAD498',
+                  color: loginError.includes('terkunci')
+                    ? '#991B1B'
+                    : '#854D0E',
+                  fontSize: '0.8125rem',
+                  fontWeight: 700,
+                  lineHeight: 1.45,
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                }}
+              >
+                <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>
+                  {loginError.includes('terkunci') ? '🔒' : '⚠️'}
+                </span>
+                <span>{loginError}</span>
               </div>
             )}
 

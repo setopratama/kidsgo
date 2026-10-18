@@ -119,7 +119,7 @@ describe('Auth & Security (Child & Admin)', () => {
     assert.strictEqual(res.statusCode, 401);
     const body = JSON.parse(res.payload);
     assert.strictEqual(body.success, false);
-    assert.strictEqual(body.message, 'Nama anak atau PIN tidak cocok.');
+    assert.ok(body.message.includes('Nama anak atau PIN tidak cocok'));
   });
 
   let adminCookie = '';

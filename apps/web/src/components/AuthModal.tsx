@@ -164,7 +164,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ initialMode = 'login', onS
               gap: '8px',
             }}
           >
-            <span>💡</span>
+            <span>{error.includes('terkunci') ? '🔒' : '💡'}</span>
             <span>{error}</span>
           </div>
         )}

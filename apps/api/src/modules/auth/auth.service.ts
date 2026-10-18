@@ -29,7 +29,7 @@ export class AuthService {
 
   // Aturan proteksi brute-force PIN
   private static MAX_ATTEMPTS = 5;
-  private static LOCK_DURATION_MS = 15 * 60 * 1000; // 15 menit
+  private static LOCK_DURATION_MS = 60 * 1000; // 1 menit (sementara sesuai permintaan)
 
   /**
    * Cek & terapkan rate limiting berdasarkan identitas pengguna / IP
@@ -42,7 +42,7 @@ export class AuthService {
     if (entry.lockedUntil > now) {
       const waitSeconds = Math.ceil((entry.lockedUntil - now) / 1000);
       throw new Error(
-        `Terlalu banyak percobaan PIN yang salah. Silakan coba lagi dalam ${waitSeconds} detik.`
+        `🔒 Terlalu banyak percobaan PIN yang salah. Akun terkunci sementara, silakan coba lagi dalam ${waitSeconds} detik.`
       );
     }
 
@@ -52,16 +52,34 @@ export class AuthService {
     }
   }
 
-  private static recordFailedAttempt(key: string): void {
+  private static recordFailedAttempt(key: string): {
+    attempts: number;
+    remainingAttempts: number;
+    isLocked: boolean;
+    waitSeconds: number;
+  } {
     const now = Date.now();
     const entry = this.rateLimitMap.get(key) || { attempts: 0, lockedUntil: 0 };
     entry.attempts += 1;
 
+    let isLocked = false;
+    let waitSeconds = 0;
+
     if (entry.attempts >= this.MAX_ATTEMPTS) {
       entry.lockedUntil = now + this.LOCK_DURATION_MS;
+      isLocked = true;
+      waitSeconds = Math.ceil(this.LOCK_DURATION_MS / 1000);
     }
 
     this.rateLimitMap.set(key, entry);
+
+    const remainingAttempts = Math.max(0, this.MAX_ATTEMPTS - entry.attempts);
+    return {
+      attempts: entry.attempts,
+      remainingAttempts,
+      isLocked,
+      waitSeconds,
+    };
   }
 
   private static resetFailedAttempts(key: string): void {
@@ -175,14 +193,28 @@ export class AuthService {
     `).get(nickname) as (PlayerPublicProfile & { pin_hash: string }) | undefined;
 
     if (!row) {
-      this.recordFailedAttempt(rateLimitKey);
-      throw new Error('Nama anak atau PIN tidak cocok.');
+      const lockInfo = this.recordFailedAttempt(rateLimitKey);
+      if (lockInfo.isLocked) {
+        throw new Error(
+          `🔒 Terlalu banyak percobaan PIN yang salah. Akun terkunci sementara, silakan coba lagi dalam ${lockInfo.waitSeconds} detik.`
+        );
+      }
+      throw new Error(
+        `Nama anak atau PIN tidak cocok. Sisa percobaan: ${lockInfo.remainingAttempts} kali sebelum akun terkunci.`
+      );
     }
 
     const isMatch = await bcrypt.compare(params.pin, row.pin_hash);
     if (!isMatch) {
-      this.recordFailedAttempt(rateLimitKey);
-      throw new Error('Nama anak atau PIN tidak cocok.');
+      const lockInfo = this.recordFailedAttempt(rateLimitKey);
+      if (lockInfo.isLocked) {
+        throw new Error(
+          `🔒 Terlalu banyak percobaan PIN yang salah. Akun terkunci sementara, silakan coba lagi dalam ${lockInfo.waitSeconds} detik.`
+        );
+      }
+      throw new Error(
+        `Nama anak atau PIN tidak cocok. Sisa percobaan: ${lockInfo.remainingAttempts} kali sebelum akun terkunci.`
+      );
     }
 
     this.resetFailedAttempts(rateLimitKey);
@@ -270,14 +302,28 @@ export class AuthService {
     } | undefined;
 
     if (!row) {
-      this.recordFailedAttempt(rateLimitKey);
-      throw new Error('Kredensial admin tidak valid.');
+      const lockInfo = this.recordFailedAttempt(rateLimitKey);
+      if (lockInfo.isLocked) {
+        throw new Error(
+          `🔒 Terlalu banyak percobaan PIN yang salah. Akun admin terkunci sementara, silakan coba lagi dalam ${lockInfo.waitSeconds} detik.`
+        );
+      }
+      throw new Error(
+        `Kredensial admin tidak valid. Sisa percobaan: ${lockInfo.remainingAttempts} kali sebelum akun terkunci.`
+      );
     }
 
     const isMatch = await bcrypt.compare(params.pin, row.pin_hash);
     if (!isMatch) {
-      this.recordFailedAttempt(rateLimitKey);
-      throw new Error('Kredensial admin tidak valid.');
+      const lockInfo = this.recordFailedAttempt(rateLimitKey);
+      if (lockInfo.isLocked) {
+        throw new Error(
+          `🔒 Terlalu banyak percobaan PIN yang salah. Akun admin terkunci sementara, silakan coba lagi dalam ${lockInfo.waitSeconds} detik.`
+        );
+      }
+      throw new Error(
+        `PIN admin salah. Sisa percobaan: ${lockInfo.remainingAttempts} kali sebelum akun terkunci.`
+      );
     }
 
     this.resetFailedAttempts(rateLimitKey);
