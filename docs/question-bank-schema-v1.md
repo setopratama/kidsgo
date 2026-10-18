@@ -48,6 +48,7 @@ Setiap berkas JSON bank soal mewakili satu kumpulan soal untuk topik dan tingkat
 | `semester` | Integer | Ya | Bernilai `1` atau `2`. |
 | `topic` | String | Ya | Slug topik kurikulum (contoh: `addition`, `counting`, `shapes`). |
 | `difficulty` | Integer | Ya | Skala kesulitan `1` (sangat mudah) hingga `5` (menantang). |
+| `level_number` | Integer | Tidak (Opsional) | Nomor level petualangan (contoh: `1` untuk Level 1). Jika diisi, seluruh soal dalam file otomatis langsung dipasang ke Jalur Petualangan kurikulum tersebut! (Alias opsional: `level`). |
 | `questions` | Array | Ya | Daftar soal (minimal 1 soal per berkas). |
 
 ---

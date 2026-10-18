@@ -479,5 +479,70 @@ describe('Curriculum & Question Bank Engine', () => {
       .get(testQuestionId) as { semester: number };
     assert.strictEqual(row.semester, 1);
   });
+
+  test('Impor Bank Soal dengan Jalur/Level langsung mengaitkan soal ke level dan kurikulum', async () => {
+    const importPayload = {
+      schema_version: '1.0',
+      subject: 'mathematics',
+      education_level: 'TK_B',
+      semester: 1,
+      topic: 'all',
+      level_number: 1,
+      difficulty: 2,
+      questions: [
+        {
+          question_id: 'MATH-TKB-DIRECT-0001',
+          type: 'multiple_choice',
+          question: 'Hitunglah ada berapa jari di satu tangan?',
+          visual: '🖐️',
+          options: [
+            { id: 'A', text: '4' },
+            { id: 'B', text: '5' },
+            { id: 'C', text: '6' },
+          ],
+          correct_answer: 'B',
+          explanation: 'Satu tangan manusia normal memiliki 5 jari.',
+          tags: ['counting', 'tk-b'],
+        },
+      ],
+    };
+
+    // 1. Validasi mengidentifikasi target level
+    const valRes = await app.inject({
+      method: 'POST',
+      url: '/api/admin/questions/validate',
+      payload: importPayload,
+    });
+    assert.strictEqual(valRes.statusCode, 200);
+    const valBody = JSON.parse(valRes.payload);
+    assert.strictEqual(valBody.report.is_valid, true);
+    assert.ok(valBody.report.matched_level);
+    assert.strictEqual(valBody.report.matched_level.level_number, 1);
+
+    // 2. Impor langsung mengaitkan soal ke level dan topik kurikulum
+    const importRes = await app.inject({
+      method: 'POST',
+      url: '/api/admin/questions/import',
+      payload: importPayload,
+    });
+    assert.strictEqual(importRes.statusCode, 201);
+    const impBody = JSON.parse(importRes.payload);
+    assert.strictEqual(impBody.success, true);
+    assert.ok(impBody.data.matched_level);
+    assert.strictEqual(impBody.data.matched_level.level_number, 1);
+
+    const db = getDb();
+    const qRow = db.prepare(`
+      SELECT q.id, q.question_id, q.level_id, q.topic_id, l.level_number, t.slug as topic_slug
+      FROM questions q
+      JOIN levels l ON q.level_id = l.id
+      JOIN topics t ON q.topic_id = t.id
+      WHERE q.question_id = 'MATH-TKB-DIRECT-0001'
+    `).get() as any;
+
+    assert.ok(qRow, 'Soal harus berhasil disimpan dan terhubung ke tabel levels dan topics');
+    assert.strictEqual(qRow.level_number, 1);
+    assert.strictEqual(qRow.topic_slug, 'tk-b-s1-hitung-1-10');
+  });
 });
 

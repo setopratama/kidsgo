@@ -42,6 +42,22 @@ export const questionBankFileSchema = {
       minimum: 1,
       maximum: 5,
     },
+    level_number: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 100,
+    },
+    level: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 100,
+    },
+    level_name: {
+      type: 'string',
+    },
+    target_level_id: {
+      type: 'string',
+    },
     questions: {
       type: 'array',
       minItems: 1,
@@ -58,6 +74,16 @@ export const questionBankFileSchema = {
         ],
         additionalProperties: false,
         properties: {
+          level_number: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 100,
+          },
+          level: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 100,
+          },
           question_id: {
             type: 'string',
             minLength: 3,

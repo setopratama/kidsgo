@@ -8,11 +8,20 @@ export interface ValidationIssue {
   severity: 'error' | 'warning';
 }
 
+export interface MatchedLevelInfo {
+  id: string;
+  level_number: number;
+  name: string;
+  topic_id: string;
+  topic_name: string;
+}
+
 export interface ValidationReport {
   is_valid: boolean;
   total_questions: number;
   errors: ValidationIssue[];
   warnings: ValidationIssue[];
+  matched_level?: MatchedLevelInfo;
 }
 
 export class QuestionBankService {
@@ -214,25 +223,85 @@ export class QuestionBankService {
       }
     }
 
+    // 3. Resolusi Otomatis Jalur / Level Tujuan (jika ada di JSON)
+    const matchedLevel = this.resolveLevel(content);
+    const requestedLevelNumber = content.level_number ?? content.level;
+    if (typeof requestedLevelNumber === 'number' && !matchedLevel) {
+      warnings.push({
+        field: 'level_number',
+        message: `Level ${requestedLevelNumber} belum ditemukan pada kurikulum ${content.education_level} Semester ${content.semester}. Soal akan diimpor tanpa alokasi level.`,
+        severity: 'warning',
+      });
+    }
+
     return {
       is_valid: errors.length === 0,
       total_questions: content.questions.length,
       errors,
       warnings,
+      matched_level: matchedLevel,
     };
   }
 
   /**
+   * Helper internal untuk mencocokkan level tujuan dari data JSON / target_level_id
+   */
+  private static resolveLevel(
+    content: QuestionBankFile,
+    targetLevelId?: string
+  ): MatchedLevelInfo | undefined {
+    const db = getDb();
+    const requestedTargetLevelId = targetLevelId || content.target_level_id;
+    const requestedLevelNumber = content.level_number ?? content.level;
+    const requestedLevelName = content.level_name;
+
+    if (requestedTargetLevelId) {
+      const row = db.prepare(`
+        SELECT l.id, l.name, l.level_number, l.topic_id, t.name as topic_name
+        FROM levels l
+        JOIN topics t ON l.topic_id = t.id
+        WHERE l.id = ?
+      `).get(requestedTargetLevelId) as MatchedLevelInfo | undefined;
+      if (row) return row;
+    }
+
+    if (typeof requestedLevelNumber === 'number') {
+      const row = db.prepare(`
+        SELECT l.id, l.name, l.level_number, l.topic_id, t.name as topic_name
+        FROM levels l
+        JOIN topics t ON l.topic_id = t.id
+        WHERE t.education_level = ? AND t.semester = ? AND l.level_number = ?
+      `).get(content.education_level, content.semester, requestedLevelNumber) as MatchedLevelInfo | undefined;
+      if (row) return row;
+    }
+
+    if (requestedLevelName) {
+      const row = db.prepare(`
+        SELECT l.id, l.name, l.level_number, l.topic_id, t.name as topic_name
+        FROM levels l
+        JOIN topics t ON l.topic_id = t.id
+        WHERE t.education_level = ? AND t.semester = ? AND l.name LIKE ?
+      `).get(content.education_level, content.semester, `%${requestedLevelName}%`) as MatchedLevelInfo | undefined;
+      if (row) return row;
+    }
+
+    return undefined;
+  }
+
+  /**
    * Impor berkas bank soal ke database dengan status awal 'draft'
+   * Mendukung penempatan langsung ke jalur petualangan (level) dan kurikulum (topic)
    */
   static importQuestions(
     content: QuestionBankFile,
     importedBy = 'admin',
-    filename = 'upload.json'
+    filename = 'upload.json',
+    targetLevelId?: string
   ): {
     batch_id: string;
     total_imported: number;
     status: string;
+    matched_level?: MatchedLevelInfo;
     warnings: ValidationIssue[];
   } {
     const report = this.validateContent(content);
@@ -244,14 +313,12 @@ export class QuestionBankService {
     const batchId = `batch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
 
-    db.transaction(() => {
-      // 1. Catat riwayat batch impor
-      db.prepare(`
-        INSERT INTO question_import_batches (id, filename, total_questions, status, imported_by, created_at)
-        VALUES (?, ?, ?, 'imported', ?, ?)
-      `).run(batchId, filename, content.questions.length, importedBy, now);
+    const matchedLevel = this.resolveLevel(content, targetLevelId);
 
-      // 2. Hubungkan ke topik kurikulum jika ada
+    // Hubungkan ke topik kurikulum:
+    // Jika level cocok, utamakan topic_id dari level tersebut agar konsisten dengan kurikulum!
+    let defaultTopicId = matchedLevel ? matchedLevel.topic_id : null;
+    if (!defaultTopicId) {
       const topicRow = db.prepare(`
         SELECT id FROM topics 
         WHERE education_level = ? AND semester = ? AND (slug = ? OR name LIKE ?)
@@ -261,23 +328,49 @@ export class QuestionBankService {
         content.topic,
         `%${content.topic}%`
       ) as { id: string } | undefined;
+      defaultTopicId = topicRow ? topicRow.id : null;
+    }
 
-      const topicId = topicRow ? topicRow.id : null;
+    const defaultLevelId = matchedLevel ? matchedLevel.id : null;
 
-      // 3. Masukkan soal dengan status 'draft'
+    db.transaction(() => {
+      // 1. Catat riwayat batch impor
+      db.prepare(`
+        INSERT INTO question_import_batches (id, filename, total_questions, status, imported_by, created_at)
+        VALUES (?, ?, ?, 'imported', ?, ?)
+      `).run(batchId, filename, content.questions.length, importedBy, now);
+
+      // 2. Masukkan soal dengan status 'draft' dan level_id
       const insertStmt = db.prepare(`
         INSERT INTO questions (
-          id, question_id, subject, education_level, semester, topic_id, difficulty,
+          id, question_id, subject, education_level, semester, topic_id, level_id, difficulty,
           type, question, visual, options_json, correct_answer, explanation, tags_json,
           status, import_batch_id, created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?, ?, ?,
           'draft', ?, ?, ?
         )
       `);
 
       for (const q of content.questions) {
+        let itemLevelId = defaultLevelId;
+        let itemTopicId = defaultTopicId;
+
+        // Cek jika butir soal memiliki level_number sendiri
+        const itemLevelNum = (q as any).level_number ?? (q as any).level;
+        if (typeof itemLevelNum === 'number' && (!matchedLevel || itemLevelNum !== matchedLevel.level_number)) {
+          const itemLvl = db.prepare(`
+            SELECT l.id, l.topic_id FROM levels l
+            JOIN topics t ON l.topic_id = t.id
+            WHERE t.education_level = ? AND t.semester = ? AND l.level_number = ?
+          `).get(content.education_level, content.semester, itemLevelNum) as any;
+          if (itemLvl) {
+            itemLevelId = itemLvl.id;
+            itemTopicId = itemLvl.topic_id;
+          }
+        }
+
         const id = `q-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
         insertStmt.run(
           id,
@@ -285,7 +378,8 @@ export class QuestionBankService {
           content.subject,
           content.education_level,
           content.semester,
-          topicId,
+          itemTopicId,
+          itemLevelId,
           content.difficulty,
           q.type,
           q.question,
@@ -305,6 +399,7 @@ export class QuestionBankService {
       batch_id: batchId,
       total_imported: content.questions.length,
       status: 'draft',
+      matched_level: matchedLevel,
       warnings: report.warnings,
     };
   }

@@ -157,6 +157,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [validationReport, setValidationReport] = useState<any | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [selectedImportLevelId, setSelectedImportLevelId] = useState<string>('');
 
   // Players State
   const [players, setPlayers] = useState<PlayerItem[]>([]);
@@ -663,12 +664,84 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   };
 
 
+  // Daftar seluruh level di kurikulum untuk target impor langsung
+  const allCurriculumLevels = useMemo(() => {
+    const list: {
+      id: string;
+      education_level: string;
+      semester: number;
+      topic_id: string;
+      topic_name: string;
+      topic_slug: string;
+      level_number: number;
+      name: string;
+    }[] = [];
+    for (const topic of curriculumTopics) {
+      for (const lvl of topic.levels || []) {
+        list.push({
+          id: lvl.id,
+          education_level: topic.education_level,
+          semester: topic.semester,
+          topic_id: topic.id,
+          topic_name: topic.name,
+          topic_slug: topic.slug,
+          level_number: lvl.level_number,
+          name: lvl.name,
+        });
+      }
+    }
+    return list;
+  }, [curriculumTopics]);
+
+  // Helper untuk memuat template soal khusus level tertentu
+  const loadTemplateForLevel = (levelId: string) => {
+    const target = allCurriculumLevels.find((l) => l.id === levelId);
+    if (!target) return;
+    const cleanLevel = target.education_level.replace('_', '');
+    setImportJsonText(
+      JSON.stringify(
+        {
+          schema_version: '1.0',
+          subject: 'mathematics',
+          education_level: target.education_level,
+          semester: target.semester,
+          topic: target.topic_slug || target.topic_name.toLowerCase().replace(/\s+/g, '-'),
+          level_number: target.level_number,
+          difficulty: 2,
+          questions: [
+            {
+              question_id: `MATH-${cleanLevel}-S${target.semester}-L${target.level_number}-001`,
+              type: 'multiple_choice',
+              question: `Berapakah hasil dari 5 + 3? (${target.name})`,
+              visual: '🍎🍎🍎🍎🍎 + 🍎🍎🍎',
+              options: [
+                { id: 'A', text: '7' },
+                { id: 'B', text: '8' },
+                { id: 'C', text: '9' },
+              ],
+              correct_answer: 'B',
+              explanation: `Lima ditambah tiga sama dengan delapan (${target.name}).`,
+              tags: [target.topic_slug || 'addition', 'math'],
+            },
+          ],
+        },
+        null,
+        2
+      )
+    );
+    setValidationReport(null);
+    setImportStatus(null);
+  };
+
   // Handle Validasi JSON Bank Soal
   const handleValidateJson = async () => {
     setValidationReport(null);
     setImportStatus(null);
     try {
       const parsed = JSON.parse(importJsonText);
+      if (selectedImportLevelId) {
+        parsed.target_level_id = selectedImportLevelId;
+      }
       const res = await fetch('/api/admin/questions/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -690,6 +763,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const handleImportJson = async () => {
     try {
       const parsed = JSON.parse(importJsonText);
+      if (selectedImportLevelId) {
+        parsed.target_level_id = selectedImportLevelId;
+      }
       const res = await fetch('/api/admin/questions/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -698,10 +774,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
       });
       const data = await res.json();
       if (data.success) {
-        setImportStatus(`✅ Berhasil mengimpor ${data.data.total_imported} soal sebagai draft!`);
+        const matched = data.data?.matched_level;
+        const successMsg = matched
+          ? `✅ Berhasil mengimpor ${data.data.total_imported} soal dan LANGSUNG TERPASANG di Jalur Level ${matched.level_number}: ${matched.name} (Topik: ${matched.topic_name})!`
+          : `✅ Berhasil mengimpor ${data.data.total_imported} soal sebagai draft!`;
+        setImportStatus(successMsg);
         setImportJsonText('');
         setValidationReport(null);
+        setSelectedImportLevelId('');
         fetchQuestions();
+        fetchCurriculum();
       } else {
         setImportStatus(`❌ Impor gagal: ${data.message}`);
       }
@@ -916,6 +998,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
           education_level: 'SD_1',
           semester: 1,
           topic: 'addition',
+          level_number: 1,
           difficulty: 2,
           questions: [
             {
@@ -2509,6 +2592,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                                   <td style={{ padding: '10px 12px', textAlign: 'right' }}>
                                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
                                       <button
+                                        onClick={() => {
+                                          setSelectedImportLevelId(lvl.id);
+                                          loadTemplateForLevel(lvl.id);
+                                          setIsImportModalOpen(true);
+                                        }}
+                                        style={{
+                                          padding: '4px 8px',
+                                          backgroundColor: '#F0FDF4',
+                                          border: '1px solid #BBF7D0',
+                                          color: '#166534',
+                                          borderRadius: '4px',
+                                          fontSize: '0.6875rem',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                        }}
+                                        title="Impor berkas JSON langsung terpasang ke level ini"
+                                      >
+                                        + Impor Soal 📥
+                                      </button>
+                                      <button
                                         onClick={() => handleOpenManageLevelQuestions(lvl, topic)}
                                         style={{
                                           padding: '4px 8px',
@@ -3574,6 +3677,68 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                   </button>
                 </div>
 
+                {/* Pemilih Jalur & Level Tujuan Langsung */}
+                <div
+                  style={{
+                    marginTop: '16px',
+                    padding: '14px 16px',
+                    backgroundColor: '#F8FAFC',
+                    borderRadius: '8px',
+                    border: '1.5px solid #E2E8F0',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <label style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#1E293B', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>🎯 Target Jalur & Level Kurikulum (Langsung Masuk):</span>
+                    </label>
+                    {selectedImportLevelId && (
+                      <button
+                        type="button"
+                        onClick={() => loadTemplateForLevel(selectedImportLevelId)}
+                        style={{
+                          fontSize: '0.75rem',
+                          color: '#2563EB',
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          fontWeight: 700,
+                          textDecoration: 'underline',
+                        }}
+                      >
+                        📝 Muat Template Soal Level Ini
+                      </button>
+                    )}
+                  </div>
+                  <select
+                    value={selectedImportLevelId}
+                    onChange={(e) => {
+                      setSelectedImportLevelId(e.target.value);
+                      setValidationReport(null);
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: '6px',
+                      border: '1.5px solid #CBD5E1',
+                      fontSize: '0.8125rem',
+                      backgroundColor: '#FFFFFF',
+                      color: '#0F172A',
+                      fontWeight: 600,
+                      outline: 'none',
+                    }}
+                  >
+                    <option value="">⚙️ Otomatis (Gunakan "level_number" atau "level" di dalam JSON)</option>
+                    {allCurriculumLevels.map((lvl) => (
+                      <option key={lvl.id} value={lvl.id}>
+                        {lvl.education_level.replace('_', ' ')} (Sem {lvl.semester}) ➔ Level {lvl.level_number}: {lvl.name} [{lvl.topic_name}]
+                      </option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '6px' }}>
+                    💡 <em>Jika memilih level di sini ATAU menyertakan <code>"level_number": 1</code> di JSON, soal langsung masuk ke petualangan level tersebut!</em>
+                  </div>
+                </div>
+
                 <div style={{ marginTop: '16px' }}>
                   <label style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#334155', display: 'block', marginBottom: '8px' }}>
                     Editor JSON Bank Soal:
@@ -3582,7 +3747,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                     rows={14}
                     value={importJsonText}
                     onChange={(e) => setImportJsonText(e.target.value)}
-                    placeholder={`{\n  "schema_version": "1.0",\n  "subject": "mathematics",\n  "education_level": "SD_1",\n  "semester": 1,\n  "topic": "addition",\n  "difficulty": 1,\n  "questions": [\n    {\n      "question_id": "MATH-SD1-S1-0021",\n      "type": "multiple_choice",\n      "question": "Berapakah 5 + 5?",\n      "options": [\n        { "id": "A", "text": "9" },\n        { "id": "B", "text": "10" },\n        { "id": "C", "text": "11" }\n      ],\n      "correct_answer": "B",\n      "explanation": "Lima ditambah lima sama dengan sepuluh.",\n      "tags": ["addition"]\n    }\n  ]\n}`}
+                    placeholder={`{\n  "schema_version": "1.0",\n  "subject": "mathematics",\n  "education_level": "SD_1",\n  "semester": 1,\n  "topic": "addition",\n  "level_number": 1,\n  "difficulty": 1,\n  "questions": [\n    {\n      "question_id": "MATH-SD1-S1-0021",\n      "type": "multiple_choice",\n      "question": "Berapakah 5 + 5?",\n      "options": [\n        { "id": "A", "text": "9" },\n        { "id": "B", "text": "10" },\n        { "id": "C", "text": "11" }\n      ],\n      "correct_answer": "B",\n      "explanation": "Lima ditambah lima sama dengan sepuluh.",\n      "tags": ["addition"]\n    }\n  ]\n}`}
                     style={{
                       width: '100%',
                       padding: '14px',
@@ -3629,6 +3794,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                         ? `✓ Format Valid! Total ${validationReport.total_questions} soal siap diimpor sebagai draft.`
                         : `✕ Validasi Gagal: Ditemukan ${validationReport.errors.length} masalah.`}
                     </strong>
+
+                    {/* Banner Jalur Terhubung */}
+                    {validationReport.is_valid && validationReport.matched_level && (
+                      <div
+                        style={{
+                          marginTop: '10px',
+                          padding: '10px 14px',
+                          borderRadius: '8px',
+                          backgroundColor: '#EFF6FF',
+                          border: '1.5px solid #93C5FD',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1D4ED8', fontWeight: 800 }}>
+                          <span>🎯 Jalur Terhubung Langsung:</span>
+                          <span style={{ backgroundColor: '#DBEAFE', padding: '2px 8px', borderRadius: '4px', color: '#1E40AF' }}>
+                            Level {validationReport.matched_level.level_number}: {validationReport.matched_level.name}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: '#2563EB', marginTop: '4px' }}>
+                          Topik Kurikulum: <strong>{validationReport.matched_level.topic_name}</strong>. Soal akan otomatis terpasang ke petualangan level ini!
+                        </div>
+                      </div>
+                    )}
+
                     {!validationReport.is_valid && (
                       <ul style={{ marginTop: '8px', paddingLeft: '18px', color: '#991B1B' }}>
                         {validationReport.errors.map((err: any, idx: number) => (
@@ -4586,14 +4775,75 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
             {/* Isi Editor & Preview */}
             <div style={{ padding: '20px 24px', flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <p style={{ fontSize: '0.8125rem', color: '#475569' }}>
-                Tempel format JSON sesuai kontrak schema di <code>docs/question-bank-schema-v1.md</code>. Sistem akan memvalidasi keutuhan schema, ID unik, dan referensi kunci jawaban sebelum disimpan ke status <strong>draft</strong>.
+                Tempel format JSON sesuai kontrak schema di <code>docs/question-bank-schema-v1.md</code>. Anda dapat menentukan <strong>Level Tujuan</strong> di bawah ini agar soal otomatis langsung masuk ke Jalur Petualangan & Kurikulum!
               </p>
+
+              {/* Pemilih Jalur & Level Tujuan Langsung */}
+              <div
+                style={{
+                  padding: '12px 14px',
+                  backgroundColor: '#F8FAFC',
+                  borderRadius: '8px',
+                  border: '1.5px solid #E2E8F0',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <label style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#1E293B', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>🎯 Target Jalur & Level Kurikulum (Langsung Masuk):</span>
+                  </label>
+                  {selectedImportLevelId && (
+                    <button
+                      type="button"
+                      onClick={() => loadTemplateForLevel(selectedImportLevelId)}
+                      style={{
+                        fontSize: '0.75rem',
+                        color: '#2563EB',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontWeight: 700,
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      📝 Muat Template Soal Level Ini
+                    </button>
+                  )}
+                </div>
+                <select
+                  value={selectedImportLevelId}
+                  onChange={(e) => {
+                    setSelectedImportLevelId(e.target.value);
+                    setValidationReport(null);
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1.5px solid #CBD5E1',
+                    fontSize: '0.8125rem',
+                    backgroundColor: '#FFFFFF',
+                    color: '#0F172A',
+                    fontWeight: 600,
+                    outline: 'none',
+                  }}
+                >
+                  <option value="">⚙️ Otomatis (Gunakan "level_number" atau "level" di dalam JSON)</option>
+                  {allCurriculumLevels.map((lvl) => (
+                    <option key={lvl.id} value={lvl.id}>
+                      {lvl.education_level.replace('_', ' ')} (Sem {lvl.semester}) ➔ Level {lvl.level_number}: {lvl.name} [{lvl.topic_name}]
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '6px' }}>
+                  💡 <em>Jika memilih level di sini ATAU menyertakan <code>"level_number": 1</code> di JSON, soal langsung masuk ke petualangan level tersebut!</em>
+                </div>
+              </div>
 
               <textarea
                 rows={12}
                 value={importJsonText}
                 onChange={(e) => setImportJsonText(e.target.value)}
-                placeholder={`{\n  "schema_version": "1.0",\n  "subject": "mathematics",\n  "education_level": "SD_1",\n  "semester": 1,\n  "topic": "addition",\n  "difficulty": 1,\n  "questions": [\n    {\n      "question_id": "MATH-SD1-S1-NEW",\n      "type": "multiple_choice",\n      "question": "Berapakah 5 + 5?",\n      "options": [\n        { "id": "A", "text": "9" },\n        { "id": "B", "text": "10" },\n        { "id": "C", "text": "11" }\n      ],\n      "correct_answer": "B",\n      "explanation": "Lima ditambah lima sama dengan sepuluh.",\n      "tags": ["addition"]\n    }\n  ]\n}`}
+                placeholder={`{\n  "schema_version": "1.0",\n  "subject": "mathematics",\n  "education_level": "SD_1",\n  "semester": 1,\n  "topic": "addition",\n  "level_number": 1,\n  "difficulty": 1,\n  "questions": [\n    {\n      "question_id": "MATH-SD1-S1-NEW",\n      "type": "multiple_choice",\n      "question": "Berapakah 5 + 5?",\n      "options": [\n        { "id": "A", "text": "9" },\n        { "id": "B", "text": "10" },\n        { "id": "C", "text": "11" }\n      ],\n      "correct_answer": "B",\n      "explanation": "Lima ditambah lima sama dengan sepuluh.",\n      "tags": ["addition"]\n    }\n  ]\n}`}
                 style={{
                   width: '100%',
                   padding: '12px 14px',
@@ -4636,6 +4886,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                       ? `✓ Format Valid! Total ${validationReport.total_questions} soal siap diimpor sebagai draft.`
                       : `✕ Validasi Gagal: Ditemukan ${validationReport.errors.length} masalah.`}
                   </strong>
+
+                  {/* Banner Jalur Terhubung */}
+                  {validationReport.is_valid && validationReport.matched_level && (
+                    <div
+                      style={{
+                        marginTop: '10px',
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        backgroundColor: '#EFF6FF',
+                        border: '1.5px solid #93C5FD',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1D4ED8', fontWeight: 800 }}>
+                        <span>🎯 Jalur Terhubung Langsung:</span>
+                        <span style={{ backgroundColor: '#DBEAFE', padding: '2px 8px', borderRadius: '4px', color: '#1E40AF' }}>
+                          Level {validationReport.matched_level.level_number}: {validationReport.matched_level.name}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#2563EB', marginTop: '4px' }}>
+                        Topik Kurikulum: <strong>{validationReport.matched_level.topic_name}</strong>. Soal akan otomatis terpasang ke petualangan level ini!
+                      </div>
+                    </div>
+                  )}
+
                   {!validationReport.is_valid && (
                     <ul style={{ marginTop: '8px', paddingLeft: '18px', color: '#991B1B' }}>
                       {validationReport.errors.map((err: any, idx: number) => (
@@ -5251,18 +5525,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                   Target: <strong>⭐ {managingLevel.level.required_xp} XP</strong>
                 </div>
               </div>
-              <button
-                onClick={() => setManagingLevel(null)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.25rem',
-                  cursor: 'pointer',
-                  color: '#94A3B8',
-                }}
-              >
-                ✕
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedImportLevelId(managingLevel.level.id);
+                    loadTemplateForLevel(managingLevel.level.id);
+                    setIsImportModalOpen(true);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 12px',
+                    backgroundColor: '#F0FDF4',
+                    border: '1px solid #BBF7D0',
+                    color: '#166534',
+                    borderRadius: '6px',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                  title="Impor soal JSON langsung terpasang ke level ini"
+                >
+                  📥 Impor JSON ke Level Ini
+                </button>
+                <button
+                  onClick={() => setManagingLevel(null)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '1.25rem',
+                    cursor: 'pointer',
+                    color: '#94A3B8',
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             {/* Navigasi Tab Internal Modal */}

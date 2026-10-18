@@ -31,10 +31,19 @@ export async function questionBankRoutes(app: FastifyInstance): Promise<void> {
     },
     async (req, reply) => {
       try {
-        const result = QuestionBankService.importQuestions(req.body, 'admin', 'import.json');
+        const result = QuestionBankService.importQuestions(
+          req.body,
+          'admin',
+          'import.json',
+          (req.body as any).target_level_id
+        );
+        const successMessage = result.matched_level
+          ? `Berkas soal berhasil diimpor sebagai draft dan langsung terpasang di Level ${result.matched_level.level_number}: ${result.matched_level.name} (Topik: ${result.matched_level.topic_name})`
+          : 'Berkas soal berhasil diimpor sebagai draft';
+
         return reply.status(201).send({
           success: true,
-          message: 'Berkas soal berhasil diimpor sebagai draft',
+          message: successMessage,
           data: result,
         });
       } catch (err: unknown) {

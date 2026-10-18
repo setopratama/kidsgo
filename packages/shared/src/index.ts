@@ -86,6 +86,8 @@ export interface QuestionBankItem {
   correct_answer: string;
   explanation: string;
   tags: string[];
+  level_number?: number;
+  level?: number;
 }
 
 export interface QuestionBankFile {
@@ -95,6 +97,10 @@ export interface QuestionBankFile {
   semester: SemesterNumber;
   topic: string;
   difficulty: number;
+  level_number?: number;
+  level?: number;
+  level_name?: string;
+  target_level_id?: string;
   questions: QuestionBankItem[];
 }
 
