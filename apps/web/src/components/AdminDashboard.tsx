@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { EDUCATION_LEVELS } from '@kidsgo/shared';
 
 interface AdminUser {
@@ -14,6 +15,7 @@ interface QuestionItem {
   education_level: string;
   semester: number;
   question: string;
+  visual?: string | null;
   status: 'draft' | 'approved' | 'active' | 'archived';
   options: Array<{ id: string; text: string }>;
   correct_answer: string;
@@ -39,7 +41,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Tabs: 'questions' | 'players' | 'settings'
+  // Navigasi Tab Desktop: 'questions' | 'players' | 'settings'
   const [activeTab, setActiveTab] = useState<'questions' | 'players' | 'settings'>('questions');
 
   // Bank Soal State
@@ -47,6 +49,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const [totalQuestions, setTotalQuestions] = useState(0);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [levelFilter, setLevelFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
 
   // Import JSON State
@@ -66,8 +69,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const [newAdminPin, setNewAdminPin] = useState('');
   const [pinChangeMsg, setPinChangeMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // 1. Periksa sesi Admin saat pertama kali dimuat
-  const checkAdminSession = () => {
+  // 1. Fetch data soal dari backend
+  const fetchQuestions = () => {
+    setIsLoadingQuestions(true);
+    const params = new URLSearchParams();
+    if (statusFilter !== 'all') params.append('status', statusFilter);
+    if (levelFilter !== 'all') params.append('education_level', levelFilter);
+    params.append('limit', '100');
+
+    fetch(`/api/admin/questions?${params.toString()}`, { credentials: 'include' })
+      .then((res) => {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then((data) => {
+        if (data.success && Array.isArray(data.data)) {
+          setQuestions(data.data);
+          const total = data.pagination?.total ?? data.total ?? data.data.length;
+          setTotalQuestions(total);
+        } else {
+          setQuestions([]);
+          setTotalQuestions(0);
+        }
+      })
+      .catch((err) => {
+        console.error('Gagal mengambil daftar soal:', err);
+        setQuestions([]);
+      })
+      .finally(() => setIsLoadingQuestions(false));
+  };
+
+  // 2. Fetch data murid dari backend
+  const fetchPlayers = () => {
+    fetch('/api/admin/players', { credentials: 'include' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.players)) {
+          setPlayers(data.players);
+        }
+      })
+      .catch((err) => console.error('Gagal mengambil data anak:', err));
+  };
+
+  // 3. Periksa sesi Admin saat pertama kali dimuat
+  useEffect(() => {
     fetch('/api/admin/auth/me', { credentials: 'include' })
       .then((res) => {
         if (!res.ok) throw new Error('Not logged in as admin');
@@ -76,52 +121,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
       .then((data) => {
         if (data.success && data.admin) {
           setAdmin(data.admin);
+          fetchQuestions();
+          fetchPlayers();
         }
       })
-      .catch(() => {
-        setAdmin(null);
-      });
-  };
-
-  useEffect(() => {
-    checkAdminSession();
+      .catch(() => setAdmin(null));
   }, []);
 
-  // 2. Load daftar soal saat tab questions aktif atau filter berubah
-  const fetchQuestions = () => {
-    if (!admin) return;
-    setIsLoadingQuestions(true);
-
-    const params = new URLSearchParams();
-    if (statusFilter !== 'all') params.append('status', statusFilter);
-    if (levelFilter !== 'all') params.append('education_level', levelFilter);
-    params.append('limit', '50');
-
-    fetch(`/api/admin/questions?${params.toString()}`, { credentials: 'include' })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
-          setQuestions(data.data || []);
-          setTotalQuestions(data.total || 0);
-        }
-      })
-      .catch((err) => console.error('Gagal mengambil daftar soal:', err))
-      .finally(() => setIsLoadingQuestions(false));
-  };
-
-  // 3. Load daftar akun anak saat tab players aktif
-  const fetchPlayers = () => {
-    if (!admin) return;
-    fetch('/api/admin/players', { credentials: 'include' })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
-          setPlayers(data.players || []);
-        }
-      })
-      .catch((err) => console.error('Gagal mengambil daftar anak:', err));
-  };
-
+  // 4. Update data saat filter berubah
   useEffect(() => {
     if (admin) {
       if (activeTab === 'questions') fetchQuestions();
@@ -155,6 +162,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
 
       setAdmin(data.admin);
       setPinInput('');
+      fetchQuestions();
+      fetchPlayers();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gagal masuk sebagai admin';
       setLoginError(msg);
@@ -315,7 +324,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
         setPinChangeMsg({ type: 'success', text: 'PIN Admin berhasil diubah!' });
         setCurrentAdminPin('');
         setNewAdminPin('');
-        checkAdminSession();
       } else {
         setPinChangeMsg({ type: 'error', text: data.message || 'Gagal mengubah PIN.' });
       }
@@ -324,869 +332,1395 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     }
   };
 
-  // Tampilan 1: Belum Login Admin (Form PIN Bootstrap 123456)
-  if (!admin) {
-    return (
-      <div
-        style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(32, 36, 44, 0.75)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: '20px',
-        }}
-      >
-        <div
-          className="card"
-          style={{
-            width: '100%',
-            maxWidth: '400px',
-            padding: '24px',
-            backgroundColor: 'var(--color-paper)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '16px',
-            boxShadow: 'var(--shadow-float)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '1.5rem' }}>🎓</span>
-              <h2 style={{ fontSize: '1.125rem', fontWeight: 800, color: 'var(--color-ink)' }}>
-                Portal Admin & Guru
-              </h2>
-            </div>
-            <button
-              onClick={onClose}
-              style={{
-                background: 'none',
-                border: 'none',
-                fontSize: '1.25rem',
-                cursor: 'pointer',
-                color: 'var(--color-muted)',
-              }}
-            >
-              ✕
-            </button>
-          </div>
-
-          <p style={{ fontSize: '0.8125rem', color: 'var(--color-muted)', lineHeight: 1.4 }}>
-            Area terpisah untuk pengelolaan kurikulum, verifikasi bank soal JSON, dan bantuan reset akun anak.
-          </p>
-
-          <div
-            style={{
-              padding: '10px 12px',
-              backgroundColor: 'var(--color-sunshine-soft)',
-              borderRadius: 'var(--radius-sm)',
-              border: '1px solid #EAD498',
-              fontSize: '0.75rem',
-              color: '#7D5700',
-            }}
-          >
-            💡 <strong>PIN Default Bootstrap:</strong> <code style={{ fontWeight: 800 }}>123456</code> (dapat diubah setelah masuk).
-          </div>
-
-          <form onSubmit={handleAdminLogin} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            <div>
-              <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: 'var(--color-ink)', display: 'block', marginBottom: '6px' }}>
-                Masukkan 6-Digit PIN Admin:
-              </label>
-              <input
-                type="password"
-                maxLength={6}
-                value={pinInput}
-                onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ''))}
-                placeholder="123456"
-                autoFocus
-                style={{
-                  width: '100%',
-                  padding: '12px 14px',
-                  fontSize: '1.25rem',
-                  letterSpacing: '0.25em',
-                  textAlign: 'center',
-                  borderRadius: 'var(--radius-input)',
-                  border: '1.5px solid var(--color-border)',
-                  outline: 'none',
-                  backgroundColor: 'var(--color-canvas)',
-                }}
-              />
-            </div>
-
-            {loginError && (
-              <div
-                style={{
-                  padding: '10px 14px',
-                  borderRadius: 'var(--radius-sm)',
-                  backgroundColor: loginError.includes('terkunci')
-                    ? 'var(--color-danger-soft)'
-                    : 'var(--color-warning-soft)',
-                  border: loginError.includes('terkunci')
-                    ? '1.5px solid var(--color-danger)'
-                    : '1px solid #EAD498',
-                  color: loginError.includes('terkunci')
-                    ? '#991B1B'
-                    : '#854D0E',
-                  fontSize: '0.8125rem',
-                  fontWeight: 700,
-                  lineHeight: 1.45,
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '8px',
-                }}
-              >
-                <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>
-                  {loginError.includes('terkunci') ? '🔒' : '⚠️'}
-                </span>
-                <span>{loginError}</span>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={isLoggingIn || pinInput.length !== 6}
-              style={{ minHeight: '46px', opacity: pinInput.length === 6 ? 1 : 0.6 }}
-            >
-              {isLoggingIn ? 'Memverifikasi...' : 'Masuk Dashboard Admin ➔'}
-            </button>
-
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={onClose}
-              style={{ minHeight: '40px' }}
-            >
-              Kembali ke Beranda Belajar
-            </button>
-          </form>
-        </div>
-      </div>
+  // Filtered Questions dengan Search
+  const filteredQuestions = useMemo(() => {
+    if (!searchQuery.trim()) return questions;
+    const q = searchQuery.toLowerCase();
+    return questions.filter(
+      (item) =>
+        item.question_id.toLowerCase().includes(q) ||
+        item.question.toLowerCase().includes(q) ||
+        item.education_level.toLowerCase().includes(q) ||
+        item.explanation.toLowerCase().includes(q)
     );
-  }
+  }, [questions, searchQuery]);
 
-  // Tampilan 2: Terautentikasi Sebagai Admin (Dashboard Penuh)
-  return (
+  // Statistik Ringkasan
+  const stats = useMemo(() => {
+    const active = questions.filter((q) => q.status === 'active').length;
+    const draft = questions.filter((q) => q.status === 'draft').length;
+    const approved = questions.filter((q) => q.status === 'approved').length;
+    return {
+      total: totalQuestions || questions.length,
+      active,
+      draft,
+      approved,
+      playersCount: players.length,
+    };
+  }, [questions, totalQuestions, players]);
+
+  // RENDER DENGAN REACT PORTAL LANGSUNG KE BODY (Agar full-screen Desktop 100vw, bukan 440px mobile box)
+  return createPortal(
     <div
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'var(--color-canvas)',
-        zIndex: 1000,
+        width: '100vw',
+        height: '100vh',
+        backgroundColor: '#F1F5F9',
+        color: '#0F172A',
+        zIndex: 99999,
         display: 'flex',
         flexDirection: 'column',
-        overflowY: 'auto',
+        overflow: 'hidden',
+        fontFamily: "'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
       }}
     >
-      {/* Top Header Admin */}
+      {/* 1. TOP HEADER KHUSUS DESKTOP PC */}
       <header
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '14px 20px',
-          backgroundColor: 'var(--color-paper)',
-          borderBottom: '1px solid var(--color-border)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 10,
+          padding: '14px 28px',
+          backgroundColor: '#FFFFFF',
+          borderBottom: '1px solid #E2E8F0',
+          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+          flexShrink: 0,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '1.5rem' }}>🎓</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div
+            style={{
+              width: '42px',
+              height: '42px',
+              borderRadius: '10px',
+              backgroundColor: '#2563EB',
+              color: 'white',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '1.4rem',
+              fontWeight: 900,
+            }}
+          >
+            🎓
+          </div>
           <div>
-            <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-ink)' }}>
-              KidsGo! Admin
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '1.25rem', fontWeight: 900, color: '#1E293B', letterSpacing: '-0.02em' }}>
+                KidsGo! Admin Portal
+              </span>
+              <span
+                style={{
+                  fontSize: '0.6875rem',
+                  fontWeight: 800,
+                  backgroundColor: '#EFF6FF',
+                  color: '#2563EB',
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid #BFDBFE',
+                  textTransform: 'uppercase',
+                }}
+              >
+                PC Dashboard
+              </span>
             </div>
-            <span style={{ fontSize: '0.6875rem', color: 'var(--color-primary)', fontWeight: 700 }}>
-              {admin.role.toUpperCase()} • {admin.username}
+            <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>
+              Sistem Manajemen Bank Soal Matematika, Kurikulum & Akun Belajar
             </span>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {/* Kontrol Kanan Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {admin && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 14px',
+                backgroundColor: '#F8FAFC',
+                border: '1px solid #E2E8F0',
+                borderRadius: '8px',
+                fontSize: '0.8125rem',
+                fontWeight: 700,
+                color: '#334155',
+              }}
+            >
+              <span>👤</span>
+              <span>{admin.username}</span>
+              <span style={{ color: '#94A3B8' }}>•</span>
+              <span style={{ color: '#2563EB', textTransform: 'capitalize' }}>{admin.role}</span>
+            </div>
+          )}
+
           <button
-            onClick={handleAdminLogout}
-            style={{
-              padding: '6px 12px',
-              fontSize: '0.75rem',
-              backgroundColor: 'var(--color-surface-soft)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-sm)',
-            }}
-          >
-            Keluar 🚪
-          </button>
-          <button
-            className="btn-secondary"
             onClick={onClose}
-            style={{ padding: '6px 14px', fontSize: '0.8125rem' }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 16px',
+              backgroundColor: '#F1F5F9',
+              border: '1px solid #CBD5E1',
+              borderRadius: '8px',
+              fontSize: '0.8125rem',
+              fontWeight: 700,
+              color: '#334155',
+              cursor: 'pointer',
+            }}
+            title="Kembali ke tampilan aplikasi anak"
           >
-            Ke Beranda 🎒
+            🎒 Tampilan Anak (Mobile Mode)
           </button>
+
+          {admin && (
+            <button
+              onClick={handleAdminLogout}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                backgroundColor: '#FEE2E2',
+                border: '1px solid #FECACA',
+                borderRadius: '8px',
+                fontSize: '0.8125rem',
+                fontWeight: 700,
+                color: '#B91C1C',
+                cursor: 'pointer',
+              }}
+            >
+              Keluar Admin 🚪
+            </button>
+          )}
         </div>
       </header>
 
-      {/* Warning Banner PIN Default */}
-      {admin.is_default_pin && (
+      {/* 2. JIKA BELUM LOGIN ADMIN: TAMPILAN LOGIN MODAL DESKTOP BERSIH */}
+      {!admin ? (
         <div
           style={{
-            backgroundColor: '#FFF4E5',
-            borderBottom: '1px solid #FFE2B8',
-            padding: '10px 20px',
+            flex: 1,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
-            fontSize: '0.8125rem',
-            color: '#8A5300',
+            justifyContent: 'center',
+            padding: '24px',
+            backgroundColor: '#F8FAFC',
           }}
         >
-          <span>
-            ⚠️ <strong>Perhatian Keamanan:</strong> Akun masih menggunakan default PIN (<code>123456</code>). Harap segera ganti PIN.
-          </span>
-          <button
-            onClick={() => setActiveTab('settings')}
+          <div
             style={{
-              padding: '4px 10px',
-              fontSize: '0.75rem',
-              backgroundColor: 'var(--color-warning)',
-              color: 'white',
-              borderRadius: 'var(--radius-xs)',
-              border: 'none',
-              cursor: 'pointer',
+              width: '100%',
+              maxWidth: '440px',
+              padding: '32px',
+              backgroundColor: '#FFFFFF',
+              borderRadius: '16px',
+              border: '1px solid #E2E8F0',
+              boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px',
             }}
           >
-            Ganti Sekarang
-          </button>
-        </div>
-      )}
-
-      {/* Sub-Navigasi Tab Admin */}
-      <div
-        style={{
-          display: 'flex',
-          backgroundColor: 'var(--color-paper)',
-          borderBottom: '1px solid var(--color-border)',
-          padding: '0 20px',
-          gap: '16px',
-        }}
-      >
-        <button
-          onClick={() => setActiveTab('questions')}
-          style={{
-            padding: '12px 0',
-            borderBottom: activeTab === 'questions' ? '3px solid var(--color-primary)' : '3px solid transparent',
-            color: activeTab === 'questions' ? 'var(--color-primary)' : 'var(--color-muted)',
-            fontWeight: 800,
-            fontSize: '0.875rem',
-            background: 'none',
-            borderRadius: 0,
-          }}
-        >
-          📚 Bank Soal
-        </button>
-        <button
-          onClick={() => setActiveTab('players')}
-          style={{
-            padding: '12px 0',
-            borderBottom: activeTab === 'players' ? '3px solid var(--color-primary)' : '3px solid transparent',
-            color: activeTab === 'players' ? 'var(--color-primary)' : 'var(--color-muted)',
-            fontWeight: 800,
-            fontSize: '0.875rem',
-            background: 'none',
-            borderRadius: 0,
-          }}
-        >
-          👥 Akun Anak & Reset PIN
-        </button>
-        <button
-          onClick={() => setActiveTab('settings')}
-          style={{
-            padding: '12px 0',
-            borderBottom: activeTab === 'settings' ? '3px solid var(--color-primary)' : '3px solid transparent',
-            color: activeTab === 'settings' ? 'var(--color-primary)' : 'var(--color-muted)',
-            fontWeight: 800,
-            fontSize: '0.875rem',
-            background: 'none',
-            borderRadius: 0,
-          }}
-        >
-          🔒 Keamanan & PIN Admin
-        </button>
-      </div>
-
-      {/* Konten Tab Admin */}
-      <main style={{ padding: '20px', flex: 1, maxWidth: '960px', width: '100%', margin: '0 auto' }}>
-        {/* TAB 1: BANK SOAL */}
-        {activeTab === 'questions' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-              <div>
-                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-ink)' }}>
-                  Kelola Bank Soal ({totalQuestions})
-                </h2>
-                <p style={{ fontSize: '0.8125rem', color: 'var(--color-muted)' }}>
-                  Status: Draft (baru impor) ➔ Disetujui (Admin OK) ➔ Aktif (Siap dimainkan anak)
-                </p>
-              </div>
-
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  className="btn-secondary"
-                  onClick={handleExportJson}
-                  style={{ fontSize: '0.8125rem', minHeight: '36px', padding: '6px 12px' }}
-                >
-                  📥 Ekspor JSON (Untuk AI)
-                </button>
-                <button
-                  className="btn-primary"
-                  onClick={() => setIsImportModalOpen(true)}
-                  style={{ fontSize: '0.8125rem', minHeight: '36px', padding: '6px 14px' }}
-                >
-                  ➕ Impor JSON Soal
-                </button>
-              </div>
-            </div>
-
-            {/* Filter Bar */}
-            <div
-              className="card"
-              style={{
-                display: 'flex',
-                gap: '12px',
-                padding: '12px',
-                flexWrap: 'wrap',
-                alignItems: 'center',
-                backgroundColor: 'var(--color-paper)',
-              }}
-            >
-              <div>
-                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-muted)', marginRight: '6px' }}>
-                  Status:
-                </label>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  style={{ padding: '6px 10px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--color-border)' }}
-                >
-                  <option value="all">Semua Status</option>
-                  <option value="draft">Draft (Perlu Approval)</option>
-                  <option value="approved">Disetujui (Siap Diaktifkan)</option>
-                  <option value="active">Aktif (Live di Game)</option>
-                  <option value="archived">Diarsipkan</option>
-                </select>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-muted)', marginRight: '6px' }}>
-                  Jenjang:
-                </label>
-                <select
-                  value={levelFilter}
-                  onChange={(e) => setLevelFilter(e.target.value)}
-                  style={{ padding: '6px 10px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--color-border)' }}
-                >
-                  <option value="all">Semua Jenjang</option>
-                  {EDUCATION_LEVELS.map((lvl) => (
-                    <option key={lvl.code} value={lvl.code}>
-                      {lvl.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Daftar Soal */}
-            {isLoadingQuestions ? (
-              <div style={{ textAlign: 'center', padding: '30px', color: 'var(--color-muted)' }}>
-                Memuat bank soal...
-              </div>
-            ) : questions.length === 0 ? (
-              <div className="card" style={{ textAlign: 'center', padding: '32px', color: 'var(--color-muted)' }}>
-                Tidak ada soal yang cocok dengan filter saat ini.
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {questions.map((q) => (
-                  <div
-                    key={q.id}
-                    className="card"
-                    style={{
-                      padding: '16px',
-                      backgroundColor: 'var(--color-paper)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <code style={{ fontSize: '0.8125rem', fontWeight: 800, color: 'var(--color-primary)' }}>
-                          {q.question_id}
-                        </code>
-                        <span className="badge" style={{ fontSize: '0.6875rem' }}>
-                          {q.education_level} • Sem {q.semester}
-                        </span>
-                      </div>
-
-                      <span
-                        className="badge"
-                        style={{
-                          fontSize: '0.75rem',
-                          backgroundColor:
-                            q.status === 'active'
-                              ? 'var(--color-mint-soft)'
-                              : q.status === 'approved'
-                              ? 'var(--color-sky-soft)'
-                              : 'var(--color-sunshine-soft)',
-                          color:
-                            q.status === 'active'
-                              ? '#0D6852'
-                              : q.status === 'approved'
-                              ? '#025E8C'
-                              : '#825600',
-                          fontWeight: 800,
-                        }}
-                      >
-                        {q.status.toUpperCase()}
-                      </span>
-                    </div>
-
-                    <p style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--color-ink)' }}>
-                      {q.question}
-                    </p>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px', margin: '4px 0' }}>
-                      {q.options.map((opt) => (
-                        <div
-                          key={opt.id}
-                          style={{
-                            padding: '6px 10px',
-                            borderRadius: 'var(--radius-xs)',
-                            backgroundColor: opt.id === q.correct_answer ? 'var(--color-mint-soft)' : 'var(--color-surface-soft)',
-                            border: opt.id === q.correct_answer ? '1.5px solid var(--color-mint)' : '1px solid var(--color-border)',
-                            fontSize: '0.8125rem',
-                            display: 'flex',
-                            gap: '6px',
-                          }}
-                        >
-                          <strong>{opt.id}.</strong> {opt.text}
-                          {opt.id === q.correct_answer && <span style={{ marginLeft: 'auto' }}>✅ Kunci</span>}
-                        </div>
-                      ))}
-                    </div>
-
-                    <div style={{ fontSize: '0.75rem', color: 'var(--color-muted)', backgroundColor: 'var(--color-canvas)', padding: '6px 10px', borderRadius: 'var(--radius-xs)' }}>
-                      💡 <strong>Penjelasan:</strong> {q.explanation}
-                    </div>
-
-                    {/* Action Bar Status */}
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px', justifyContent: 'flex-end' }}>
-                      {q.status === 'draft' && (
-                        <button
-                          onClick={() => handleUpdateStatus(q.question_id, 'approve')}
-                          style={{
-                            padding: '4px 10px',
-                            fontSize: '0.75rem',
-                            backgroundColor: 'var(--color-sky)',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: 'var(--radius-xs)',
-                          }}
-                        >
-                          Setujui Soal ✅
-                        </button>
-                      )}
-                      {q.status === 'approved' && (
-                        <button
-                          onClick={() => handleUpdateStatus(q.question_id, 'activate')}
-                          style={{
-                            padding: '4px 10px',
-                            fontSize: '0.75rem',
-                            backgroundColor: 'var(--color-mint)',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: 'var(--radius-xs)',
-                          }}
-                        >
-                          Aktifkan ke Game 🚀
-                        </button>
-                      )}
-                      {q.status !== 'archived' && (
-                        <button
-                          onClick={() => handleUpdateStatus(q.question_id, 'archive')}
-                          style={{
-                            padding: '4px 8px',
-                            fontSize: '0.75rem',
-                            backgroundColor: 'transparent',
-                            color: 'var(--color-muted)',
-                            border: '1px solid var(--color-border)',
-                            borderRadius: 'var(--radius-xs)',
-                          }}
-                        >
-                          Arsipkan 📦
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB 2: AKUN ANAK & RESET PIN */}
-        {activeTab === 'players' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-ink)' }}>
-                Kelola Akun Anak & Bantuan Orang Tua
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '3rem', marginBottom: '8px' }}>🎓</div>
+              <h2 style={{ fontSize: '1.375rem', fontWeight: 900, color: '#1E293B' }}>
+                Masuk Portal Admin & Guru
               </h2>
-              <p style={{ fontSize: '0.8125rem', color: 'var(--color-muted)' }}>
-                Jika anak lupa 4-digit PIN rahasianya, orang tua/admin dapat melakukan reset PIN secara aman.
+              <p style={{ fontSize: '0.875rem', color: '#64748B', marginTop: '6px' }}>
+                Khusus pengelolaan bank soal, verifikasi JSON AI, dan bantuan reset PIN akun anak.
               </p>
             </div>
 
-            {resetMessage && (
-              <div
+            <div
+              style={{
+                padding: '12px 14px',
+                backgroundColor: '#FEF9C3',
+                borderRadius: '10px',
+                border: '1px solid #FDE047',
+                fontSize: '0.8125rem',
+                color: '#854D0E',
+                lineHeight: 1.5,
+              }}
+            >
+              💡 <strong>Kredensial Bootstrap Default:</strong> Masukkan PIN <code style={{ fontWeight: 800, padding: '2px 6px', backgroundColor: '#FEF08A', borderRadius: '4px' }}>123456</code> untuk masuk ke dasbor.
+            </div>
+
+            <form onSubmit={handleAdminLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#334155', display: 'block', marginBottom: '8px' }}>
+                  6-Digit PIN Admin:
+                </label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ''))}
+                  placeholder="123456"
+                  autoFocus
+                  style={{
+                    width: '100%',
+                    padding: '14px 16px',
+                    fontSize: '1.5rem',
+                    letterSpacing: '0.3em',
+                    textAlign: 'center',
+                    borderRadius: '10px',
+                    border: '2px solid #CBD5E1',
+                    outline: 'none',
+                    backgroundColor: '#F8FAFC',
+                    fontWeight: 800,
+                  }}
+                />
+              </div>
+
+              {loginError && (
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '8px',
+                    backgroundColor: loginError.includes('terkunci') ? '#FEE2E2' : '#FEF3C7',
+                    border: loginError.includes('terkunci') ? '1.5px solid #EF4444' : '1px solid #FCD34D',
+                    color: loginError.includes('terkunci') ? '#991B1B' : '#92400E',
+                    fontSize: '0.8125rem',
+                    fontWeight: 700,
+                    lineHeight: 1.45,
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '8px',
+                  }}
+                >
+                  <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>
+                    {loginError.includes('terkunci') ? '🔒' : '⚠️'}
+                  </span>
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isLoggingIn || pinInput.length !== 6}
                 style={{
-                  padding: '10px 14px',
-                  borderRadius: 'var(--radius-sm)',
-                  backgroundColor: resetMessage.startsWith('✅') ? 'var(--color-mint-soft)' : 'var(--color-danger-soft)',
-                  fontWeight: 700,
-                  fontSize: '0.875rem',
+                  width: '100%',
+                  minHeight: '48px',
+                  backgroundColor: pinInput.length === 6 ? '#2563EB' : '#94A3B8',
+                  color: 'white',
+                  borderRadius: '10px',
+                  fontWeight: 800,
+                  fontSize: '0.9375rem',
+                  border: 'none',
+                  cursor: pinInput.length === 6 ? 'pointer' : 'not-allowed',
+                  transition: 'background-color 0.15s ease',
                 }}
               >
-                {resetMessage}
-              </div>
-            )}
+                {isLoggingIn ? 'Memverifikasi...' : 'Buka Dashboard Admin ➔'}
+              </button>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {players.map((p) => (
+              <button
+                type="button"
+                onClick={onClose}
+                style={{
+                  width: '100%',
+                  minHeight: '42px',
+                  backgroundColor: 'transparent',
+                  color: '#64748B',
+                  borderRadius: '10px',
+                  fontWeight: 700,
+                  fontSize: '0.875rem',
+                  border: '1px solid #E2E8F0',
+                  cursor: 'pointer',
+                }}
+              >
+                Kembali ke Beranda Belajar Anak
+              </button>
+            </form>
+          </div>
+        </div>
+      ) : (
+        /* 3. JIKA SUDAH LOGIN: TAMPILAN DASHBOARD PC FULL WIDTH & PENUH FITUR */
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* Warning Banner PIN Default */}
+          {admin.is_default_pin && (
+            <div
+              style={{
+                backgroundColor: '#FEF3C7',
+                borderBottom: '1px solid #FCD34D',
+                padding: '10px 28px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                fontSize: '0.8125rem',
+                color: '#92400E',
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>⚠️</span>
+                <span>
+                  <strong>Perhatian Keamanan:</strong> Akun masih menggunakan PIN bawaan bootstrap (<code>123456</code>). Harap segera ubah ke PIN 6-digit pribadi.
+                </span>
+              </div>
+              <button
+                onClick={() => setActiveTab('settings')}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: '0.75rem',
+                  fontWeight: 800,
+                  backgroundColor: '#D97706',
+                  color: 'white',
+                  borderRadius: '6px',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                Ubah PIN Sekarang
+              </button>
+            </div>
+          )}
+
+          {/* Desktop Sub-Navigasi Tab Bar */}
+          <div
+            style={{
+              display: 'flex',
+              backgroundColor: '#FFFFFF',
+              borderBottom: '1px solid #E2E8F0',
+              padding: '0 28px',
+              gap: '24px',
+              flexShrink: 0,
+            }}
+          >
+            <button
+              onClick={() => setActiveTab('questions')}
+              style={{
+                padding: '14px 4px',
+                borderBottom: activeTab === 'questions' ? '3px solid #2563EB' : '3px solid transparent',
+                color: activeTab === 'questions' ? '#2563EB' : '#64748B',
+                fontWeight: 800,
+                fontSize: '0.9375rem',
+                background: 'none',
+                borderTop: 'none',
+                borderLeft: 'none',
+                borderRight: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <span>📚</span> Bank Soal & Kurikulum
+              <span
+                style={{
+                  fontSize: '0.6875rem',
+                  padding: '2px 8px',
+                  borderRadius: '999px',
+                  backgroundColor: activeTab === 'questions' ? '#EFF6FF' : '#F1F5F9',
+                  color: activeTab === 'questions' ? '#2563EB' : '#64748B',
+                }}
+              >
+                {stats.total}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('players')}
+              style={{
+                padding: '14px 4px',
+                borderBottom: activeTab === 'players' ? '3px solid #2563EB' : '3px solid transparent',
+                color: activeTab === 'players' ? '#2563EB' : '#64748B',
+                fontWeight: 800,
+                fontSize: '0.9375rem',
+                background: 'none',
+                borderTop: 'none',
+                borderLeft: 'none',
+                borderRight: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <span>👥</span> Data Murid & Reset PIN
+              <span
+                style={{
+                  fontSize: '0.6875rem',
+                  padding: '2px 8px',
+                  borderRadius: '999px',
+                  backgroundColor: activeTab === 'players' ? '#EFF6FF' : '#F1F5F9',
+                  color: activeTab === 'players' ? '#2563EB' : '#64748B',
+                }}
+              >
+                {stats.playersCount}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('settings')}
+              style={{
+                padding: '14px 4px',
+                borderBottom: activeTab === 'settings' ? '3px solid #2563EB' : '3px solid transparent',
+                color: activeTab === 'settings' ? '#2563EB' : '#64748B',
+                fontWeight: 800,
+                fontSize: '0.9375rem',
+                background: 'none',
+                borderTop: 'none',
+                borderLeft: 'none',
+                borderRight: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <span>🔒</span> Keamanan & PIN Admin
+            </button>
+          </div>
+
+          {/* Area Konten Utama Desktop (Scrollable) */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
+            {/* STATISTIK OVERVIEW CARDS GRID */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: '16px',
+                marginBottom: '24px',
+              }}
+            >
+              <div
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  padding: '18px 20px',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                }}
+              >
+                <div style={{ fontSize: '0.8125rem', color: '#64748B', fontWeight: 700 }}>
+                  Total Soal Tersimpan
+                </div>
+                <div style={{ fontSize: '1.75rem', fontWeight: 900, color: '#1E293B', marginTop: '4px' }}>
+                  {stats.total} Soal
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#2563EB', marginTop: '4px', fontWeight: 600 }}>
+                  Kurikulum Matematika TK & SD
+                </div>
+              </div>
+
+              <div
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  padding: '18px 20px',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                }}
+              >
+                <div style={{ fontSize: '0.8125rem', color: '#64748B', fontWeight: 700 }}>
+                  Soal Aktif di Game
+                </div>
+                <div style={{ fontSize: '1.75rem', fontWeight: 900, color: '#16A34A', marginTop: '4px' }}>
+                  {stats.active} Soal
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#16A34A', marginTop: '4px', fontWeight: 600 }}>
+                  ✓ Siap disajikan ke anak
+                </div>
+              </div>
+
+              <div
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  padding: '18px 20px',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                }}
+              >
+                <div style={{ fontSize: '0.8125rem', color: '#64748B', fontWeight: 700 }}>
+                  Soal Draft (Menunggu Review)
+                </div>
+                <div style={{ fontSize: '1.75rem', fontWeight: 900, color: '#D97706', marginTop: '4px' }}>
+                  {stats.draft} Soal
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#D97706', marginTop: '4px', fontWeight: 600 }}>
+                  Perlu persetujuan admin
+                </div>
+              </div>
+
+              <div
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  padding: '18px 20px',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                }}
+              >
+                <div style={{ fontSize: '0.8125rem', color: '#64748B', fontWeight: 700 }}>
+                  Total Murid Terdaftar
+                </div>
+                <div style={{ fontSize: '1.75rem', fontWeight: 900, color: '#0284C7', marginTop: '4px' }}>
+                  {stats.playersCount} Anak
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#0284C7', marginTop: '4px', fontWeight: 600 }}>
+                  Akun aktif dengan PIN
+                </div>
+              </div>
+            </div>
+
+            {/* TAB 1: BANK SOAL */}
+            {activeTab === 'questions' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {/* Action & Filter Toolbar Desktop */}
                 <div
-                  key={p.id}
-                  className="card"
                   style={{
-                    padding: '14px 18px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    backgroundColor: 'var(--color-paper)',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                    backgroundColor: '#FFFFFF',
+                    padding: '16px 20px',
+                    borderRadius: '12px',
+                    border: '1px solid #E2E8F0',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span style={{ fontSize: '1.75rem' }}>{p.avatar}</span>
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: '0.9375rem', color: 'var(--color-ink)' }}>
-                        {p.nickname}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-muted)' }}>
-                        {p.grade} • {p.current_xp} XP
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    className="btn-secondary"
-                    onClick={() => {
-                      setSelectedPlayerForReset(p);
-                      setResetMessage(null);
-                    }}
-                    style={{ padding: '6px 12px', fontSize: '0.75rem', minHeight: '34px' }}
-                  >
-                    Reset PIN 🔑
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            {/* Modal Dialog Reset PIN Anak */}
-            {selectedPlayerForReset && (
-              <div
-                style={{
-                  position: 'fixed',
-                  inset: 0,
-                  backgroundColor: 'rgba(32, 36, 44, 0.7)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  zIndex: 1100,
-                  padding: '20px',
-                }}
-              >
-                <div
-                  className="card"
-                  style={{
-                    width: '100%',
-                    maxWidth: '380px',
-                    padding: '20px',
-                    backgroundColor: 'var(--color-paper)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '14px',
-                  }}
-                >
-                  <h3 style={{ fontSize: '1rem', fontWeight: 800 }}>
-                    Reset PIN untuk {selectedPlayerForReset.nickname} {selectedPlayerForReset.avatar}
-                  </h3>
-                  <form onSubmit={handleResetPlayerPin} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    <div>
-                      <label style={{ fontSize: '0.8125rem', fontWeight: 700, display: 'block', marginBottom: '6px' }}>
-                        Masukkan PIN 4-Digit Baru:
-                      </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
+                    {/* Search Input */}
+                    <div style={{ position: 'relative', minWidth: '240px' }}>
                       <input
-                        type="password"
-                        maxLength={4}
-                        placeholder="Contoh: 5678"
-                        value={newPlayerPin}
-                        onChange={(e) => setNewPlayerPin(e.target.value.replace(/\D/g, ''))}
-                        autoFocus
+                        type="text"
+                        placeholder="🔍 Cari teks soal, ID, atau topik..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
                         style={{
                           width: '100%',
-                          padding: '10px 12px',
-                          fontSize: '1.25rem',
-                          textAlign: 'center',
-                          letterSpacing: '0.2em',
-                          borderRadius: 'var(--radius-input)',
-                          border: '1.5px solid var(--color-border)',
+                          padding: '8px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid #CBD5E1',
+                          fontSize: '0.8125rem',
+                          outline: 'none',
                         }}
                       />
                     </div>
 
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        onClick={() => setSelectedPlayerForReset(null)}
-                        style={{ flex: 1, minHeight: '40px' }}
+                    {/* Filter Status */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#64748B' }}>Status:</span>
+                      <select
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid #CBD5E1',
+                          fontSize: '0.8125rem',
+                          backgroundColor: '#FFFFFF',
+                          fontWeight: 600,
+                        }}
                       >
-                        Batal
-                      </button>
-                      <button
-                        type="submit"
-                        className="btn-primary"
-                        disabled={newPlayerPin.length !== 4}
-                        style={{ flex: 1, minHeight: '40px' }}
-                      >
-                        Simpan PIN Baru
-                      </button>
+                        <option value="all">Semua Status</option>
+                        <option value="active">Aktif (Live di Game)</option>
+                        <option value="draft">Draft (Belum Disetujui)</option>
+                        <option value="approved">Disetujui (Ready)</option>
+                        <option value="archived">Diarsipkan</option>
+                      </select>
                     </div>
-                  </form>
+
+                    {/* Filter Jenjang */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#64748B' }}>Jenjang:</span>
+                      <select
+                        value={levelFilter}
+                        onChange={(e) => setLevelFilter(e.target.value)}
+                        style={{
+                          padding: '8px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid #CBD5E1',
+                          fontSize: '0.8125rem',
+                          backgroundColor: '#FFFFFF',
+                          fontWeight: 600,
+                        }}
+                      >
+                        <option value="all">Semua Jenjang (TK A - SD 6)</option>
+                        {EDUCATION_LEVELS.map((lvl) => (
+                          <option key={lvl.code} value={lvl.code}>
+                            {lvl.name} ({lvl.age})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <button
+                      onClick={fetchQuestions}
+                      style={{
+                        padding: '8px 14px',
+                        borderRadius: '8px',
+                        border: '1px solid #CBD5E1',
+                        backgroundColor: '#F8FAFC',
+                        fontSize: '0.8125rem',
+                        fontWeight: 700,
+                        color: '#334155',
+                        cursor: 'pointer',
+                      }}
+                      title="Refresh data bank soal"
+                    >
+                      🔄 Refresh
+                    </button>
+                  </div>
+
+                  {/* Tombol Impor & Ekspor */}
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button
+                      onClick={handleExportJson}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '9px 16px',
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid #CBD5E1',
+                        borderRadius: '8px',
+                        fontSize: '0.8125rem',
+                        fontWeight: 700,
+                        color: '#334155',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      📥 Ekspor JSON (AI)
+                    </button>
+                    <button
+                      onClick={() => setIsImportModalOpen(true)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '9px 18px',
+                        backgroundColor: '#2563EB',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontSize: '0.8125rem',
+                        fontWeight: 800,
+                        color: 'white',
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)',
+                      }}
+                    >
+                      ➕ Impor Bank Soal JSON
+                    </button>
+                  </div>
+                </div>
+
+                {/* DESKTOP DATA TABLE BANK SOAL */}
+                <div
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    borderRadius: '12px',
+                    border: '1px solid #E2E8F0',
+                    overflow: 'hidden',
+                    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                  }}
+                >
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0', color: '#475569' }}>
+                        <th style={{ padding: '12px 18px', fontWeight: 800, width: '170px' }}>KODE SOAL</th>
+                        <th style={{ padding: '12px 18px', fontWeight: 800, width: '130px' }}>JENJANG</th>
+                        <th style={{ padding: '12px 18px', fontWeight: 800 }}>PERTANYAAN & OPSI JAWABAN</th>
+                        <th style={{ padding: '12px 18px', fontWeight: 800, width: '110px' }}>STATUS</th>
+                        <th style={{ padding: '12px 18px', fontWeight: 800, width: '190px', textAlign: 'right' }}>
+                          AKSI MANAJEMEN
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {isLoadingQuestions ? (
+                        <tr>
+                          <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>
+                            Memuat data bank soal...
+                          </td>
+                        </tr>
+                      ) : filteredQuestions.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>
+                            Tidak ada soal yang ditemukan untuk filter ini. Klik <strong>"➕ Impor Bank Soal JSON"</strong> untuk menambahkan soal.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredQuestions.map((q) => (
+                          <tr
+                            key={q.id}
+                            style={{
+                              borderBottom: '1px solid #F1F5F9',
+                              transition: 'background-color 0.1s ease',
+                            }}
+                          >
+                            {/* 1. Kode Soal */}
+                            <td style={{ padding: '14px 18px', verticalAlign: 'top' }}>
+                              <div style={{ fontWeight: 800, color: '#2563EB', fontFamily: 'monospace' }}>
+                                {q.question_id}
+                              </div>
+                              <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>
+                                Semester {q.semester}
+                              </span>
+                            </td>
+
+                            {/* 2. Jenjang */}
+                            <td style={{ padding: '14px 18px', verticalAlign: 'top' }}>
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  padding: '4px 8px',
+                                  backgroundColor: '#F1F5F9',
+                                  borderRadius: '6px',
+                                  fontWeight: 700,
+                                  fontSize: '0.75rem',
+                                  color: '#334155',
+                                }}
+                              >
+                                {q.education_level}
+                              </span>
+                            </td>
+
+                            {/* 3. Pertanyaan & Opsi */}
+                            <td style={{ padding: '14px 18px', verticalAlign: 'top' }}>
+                              <div style={{ fontWeight: 700, color: '#1E293B', fontSize: '0.9375rem', marginBottom: '6px' }}>
+                                {q.question}
+                              </div>
+
+                              {q.visual && (
+                                <div
+                                  style={{
+                                    display: 'inline-block',
+                                    padding: '4px 8px',
+                                    backgroundColor: '#FEF9C3',
+                                    borderRadius: '6px',
+                                    fontSize: '0.8125rem',
+                                    marginBottom: '8px',
+                                  }}
+                                >
+                                  {q.visual}
+                                </div>
+                              )}
+
+                              {/* Opsi Jawaban Grid */}
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '6px', marginTop: '4px' }}>
+                                {q.options.map((opt) => (
+                                  <div
+                                    key={opt.id}
+                                    style={{
+                                      padding: '6px 10px',
+                                      borderRadius: '6px',
+                                      backgroundColor: opt.id === q.correct_answer ? '#DCFCE7' : '#F8FAFC',
+                                      border: opt.id === q.correct_answer ? '1.5px solid #86EFAC' : '1px solid #E2E8F0',
+                                      fontSize: '0.8125rem',
+                                      color: opt.id === q.correct_answer ? '#14532D' : '#334155',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                    }}
+                                  >
+                                    <span>
+                                      <strong>{opt.id}.</strong> {opt.text}
+                                    </span>
+                                    {opt.id === q.correct_answer && (
+                                      <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#15803D' }}>
+                                        ✓ Kunci
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Penjelasan */}
+                              <div
+                                style={{
+                                  marginTop: '8px',
+                                  fontSize: '0.75rem',
+                                  color: '#64748B',
+                                  backgroundColor: '#F8FAFC',
+                                  padding: '6px 10px',
+                                  borderRadius: '6px',
+                                }}
+                              >
+                                💡 <strong>Penjelasan:</strong> {q.explanation}
+                              </div>
+                            </td>
+
+                            {/* 4. Status Badge */}
+                            <td style={{ padding: '14px 18px', verticalAlign: 'top' }}>
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  padding: '4px 10px',
+                                  borderRadius: '999px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 800,
+                                  textTransform: 'uppercase',
+                                  backgroundColor:
+                                    q.status === 'active'
+                                      ? '#DCFCE7'
+                                      : q.status === 'approved'
+                                      ? '#E0F2FE'
+                                      : '#FEF3C7',
+                                  color:
+                                    q.status === 'active'
+                                      ? '#15803D'
+                                      : q.status === 'approved'
+                                      ? '#0369A1'
+                                      : '#B45309',
+                                }}
+                              >
+                                {q.status}
+                              </span>
+                            </td>
+
+                            {/* 5. Aksi Manajemen */}
+                            <td style={{ padding: '14px 18px', verticalAlign: 'top', textAlign: 'right' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
+                                {q.status === 'draft' && (
+                                  <button
+                                    onClick={() => handleUpdateStatus(q.question_id, 'approve')}
+                                    style={{
+                                      padding: '5px 12px',
+                                      backgroundColor: '#0284C7',
+                                      color: 'white',
+                                      border: 'none',
+                                      borderRadius: '6px',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    Setujui Soal ✓
+                                  </button>
+                                )}
+
+                                {q.status === 'approved' && (
+                                  <button
+                                    onClick={() => handleUpdateStatus(q.question_id, 'activate')}
+                                    style={{
+                                      padding: '5px 12px',
+                                      backgroundColor: '#16A34A',
+                                      color: 'white',
+                                      border: 'none',
+                                      borderRadius: '6px',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    Aktifkan ke Game 🚀
+                                  </button>
+                                )}
+
+                                {q.status !== 'archived' && (
+                                  <button
+                                    onClick={() => handleUpdateStatus(q.question_id, 'archive')}
+                                    style={{
+                                      padding: '4px 10px',
+                                      backgroundColor: 'transparent',
+                                      color: '#94A3B8',
+                                      border: '1px solid #E2E8F0',
+                                      borderRadius: '6px',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    Arsipkan 📦
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}
-          </div>
-        )}
 
-        {/* TAB 3: GANTI PIN ADMIN */}
-        {activeTab === 'settings' && (
-          <div style={{ maxWidth: '440px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-ink)' }}>
-                Keamanan & Ganti PIN Admin
-              </h2>
-              <p style={{ fontSize: '0.8125rem', color: 'var(--color-muted)' }}>
-                PIN admin wajib terdiri dari 6 angka dan tidak boleh menggunakan default <code>123456</code>.
-              </p>
-            </div>
+            {/* TAB 2: DATA MURID & RESET PIN */}
+            {activeTab === 'players' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    padding: '16px 20px',
+                    borderRadius: '12px',
+                    border: '1px solid #E2E8F0',
+                  }}
+                >
+                  <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1E293B' }}>
+                    Daftar Murid Terdaftar ({players.length})
+                  </h3>
+                  <p style={{ fontSize: '0.8125rem', color: '#64748B', marginTop: '2px' }}>
+                    Jika murid lupa 4-digit PIN rahasianya, guru atau admin dapat melakukan reset PIN secara instan.
+                  </p>
+                </div>
 
-            {pinChangeMsg && (
-              <div
-                style={{
-                  padding: '10px 14px',
-                  borderRadius: 'var(--radius-sm)',
-                  backgroundColor: pinChangeMsg.type === 'success' ? 'var(--color-mint-soft)' : 'var(--color-danger-soft)',
-                  color: pinChangeMsg.type === 'success' ? '#0D6852' : 'var(--color-danger)',
-                  fontSize: '0.875rem',
-                  fontWeight: 700,
-                }}
-              >
-                {pinChangeMsg.text}
+                {resetMessage && (
+                  <div
+                    style={{
+                      padding: '12px 16px',
+                      borderRadius: '8px',
+                      backgroundColor: resetMessage.startsWith('✅') ? '#DCFCE7' : '#FEE2E2',
+                      color: resetMessage.startsWith('✅') ? '#15803D' : '#991B1B',
+                      fontWeight: 700,
+                      fontSize: '0.875rem',
+                    }}
+                  >
+                    {resetMessage}
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    borderRadius: '12px',
+                    border: '1px solid #E2E8F0',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0', color: '#475569' }}>
+                        <th style={{ padding: '12px 18px', fontWeight: 800 }}>NAMA ANAK / NICKNAME</th>
+                        <th style={{ padding: '12px 18px', fontWeight: 800 }}>JENJANG KELAS</th>
+                        <th style={{ padding: '12px 18px', fontWeight: 800 }}>PENGALAMAN (XP)</th>
+                        <th style={{ padding: '12px 18px', fontWeight: 800 }}>TANGGAL MENDAFTAR</th>
+                        <th style={{ padding: '12px 18px', fontWeight: 800, textAlign: 'right' }}>BANTUAN PIN</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {players.map((p) => (
+                        <tr key={p.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                          <td style={{ padding: '14px 18px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <span style={{ fontSize: '1.5rem' }}>{p.avatar}</span>
+                              <span style={{ fontWeight: 800, color: '#1E293B' }}>{p.nickname}</span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '14px 18px' }}>
+                            <span style={{ padding: '4px 8px', backgroundColor: '#F1F5F9', borderRadius: '6px', fontWeight: 700 }}>
+                              {p.grade}
+                            </span>
+                          </td>
+                          <td style={{ padding: '14px 18px', fontWeight: 800, color: '#D97706' }}>
+                            ⭐ {p.current_xp} XP
+                          </td>
+                          <td style={{ padding: '14px 18px', color: '#64748B', fontSize: '0.8125rem' }}>
+                            {new Date(p.created_at).toLocaleDateString('id-ID', {
+                              day: 'numeric',
+                              month: 'short',
+                              year: 'numeric',
+                            })}
+                          </td>
+                          <td style={{ padding: '14px 18px', textAlign: 'right' }}>
+                            <button
+                              onClick={() => {
+                                setSelectedPlayerForReset(p);
+                                setResetMessage(null);
+                              }}
+                              style={{
+                                padding: '6px 14px',
+                                backgroundColor: '#EFF6FF',
+                                border: '1px solid #BFDBFE',
+                                color: '#2563EB',
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Reset PIN 🔑
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Modal Dialog Reset PIN Anak */}
+                {selectedPlayerForReset && (
+                  <div
+                    style={{
+                      position: 'fixed',
+                      inset: 0,
+                      backgroundColor: 'rgba(15, 23, 42, 0.6)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 100000,
+                      padding: '20px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '100%',
+                        maxWidth: '400px',
+                        padding: '24px',
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: '16px',
+                        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '16px',
+                      }}
+                    >
+                      <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1E293B' }}>
+                        Reset PIN untuk {selectedPlayerForReset.nickname} {selectedPlayerForReset.avatar}
+                      </h3>
+                      <form onSubmit={handleResetPlayerPin} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                        <div>
+                          <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                            PIN Baru (4 Digit Angka):
+                          </label>
+                          <input
+                            type="password"
+                            maxLength={4}
+                            placeholder="Contoh: 1234"
+                            value={newPlayerPin}
+                            onChange={(e) => setNewPlayerPin(e.target.value.replace(/\D/g, ''))}
+                            autoFocus
+                            style={{
+                              width: '100%',
+                              padding: '10px 14px',
+                              fontSize: '1.25rem',
+                              textAlign: 'center',
+                              letterSpacing: '0.25em',
+                              borderRadius: '8px',
+                              border: '1.5px solid #CBD5E1',
+                            }}
+                          />
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPlayerForReset(null)}
+                            style={{
+                              flex: 1,
+                              padding: '10px',
+                              backgroundColor: '#F1F5F9',
+                              border: '1px solid #CBD5E1',
+                              borderRadius: '8px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Batal
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={newPlayerPin.length !== 4}
+                            style={{
+                              flex: 1,
+                              padding: '10px',
+                              backgroundColor: newPlayerPin.length === 4 ? '#2563EB' : '#94A3B8',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '8px',
+                              fontWeight: 700,
+                              cursor: newPlayerPin.length === 4 ? 'pointer' : 'not-allowed',
+                            }}
+                          >
+                            Simpan PIN Baru
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
-            <form onSubmit={handleChangeAdminPin} className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', backgroundColor: 'var(--color-paper)' }}>
-              <div>
-                <label style={{ fontSize: '0.8125rem', fontWeight: 700, display: 'block', marginBottom: '6px' }}>
-                  PIN Admin Saat Ini:
-                </label>
-                <input
-                  type="password"
-                  maxLength={6}
-                  placeholder="PIN lama (misal: 123456)"
-                  value={currentAdminPin}
-                  onChange={(e) => setCurrentAdminPin(e.target.value.replace(/\D/g, ''))}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: 'var(--radius-input)',
-                    border: '1.5px solid var(--color-border)',
-                  }}
-                />
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.8125rem', fontWeight: 700, display: 'block', marginBottom: '6px' }}>
-                  PIN Admin Baru (6 Digit):
-                </label>
-                <input
-                  type="password"
-                  maxLength={6}
-                  placeholder="PIN baru (tidak boleh 123456)"
-                  value={newAdminPin}
-                  onChange={(e) => setNewAdminPin(e.target.value.replace(/\D/g, ''))}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: 'var(--radius-input)',
-                    border: '1.5px solid var(--color-border)',
-                  }}
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="btn-primary"
-                disabled={currentAdminPin.length < 6 || newAdminPin.length !== 6}
-                style={{ minHeight: '44px', marginTop: '6px' }}
+            {/* TAB 3: KEAMANAN & GANTI PIN ADMIN */}
+            {activeTab === 'settings' && (
+              <div
+                style={{
+                  maxWidth: '540px',
+                  backgroundColor: '#FFFFFF',
+                  padding: '24px',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '18px',
+                }}
               >
-                Perbarui PIN Admin
-              </button>
-            </form>
-          </div>
-        )}
-      </main>
+                <div>
+                  <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1E293B' }}>
+                    Pengaturan Keamanan & PIN Admin
+                  </h3>
+                  <p style={{ fontSize: '0.8125rem', color: '#64748B', marginTop: '2px' }}>
+                    PIN admin wajib terdiri dari 6 digit angka dan tidak boleh menggunakan PIN default <code>123456</code>.
+                  </p>
+                </div>
 
-      {/* Modal Import JSON Bank Soal */}
+                {pinChangeMsg && (
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: '8px',
+                      backgroundColor: pinChangeMsg.type === 'success' ? '#DCFCE7' : '#FEE2E2',
+                      color: pinChangeMsg.type === 'success' ? '#15803D' : '#991B1B',
+                      fontSize: '0.875rem',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {pinChangeMsg.text}
+                  </div>
+                )}
+
+                <form onSubmit={handleChangeAdminPin} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div>
+                    <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                      PIN Admin Saat Ini:
+                    </label>
+                    <input
+                      type="password"
+                      maxLength={6}
+                      placeholder="PIN lama (misal: 123456)"
+                      value={currentAdminPin}
+                      onChange={(e) => setCurrentAdminPin(e.target.value.replace(/\D/g, ''))}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #CBD5E1',
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                      PIN Admin Baru (6 Digit):
+                    </label>
+                    <input
+                      type="password"
+                      maxLength={6}
+                      placeholder="PIN baru (contoh: 789123)"
+                      value={newAdminPin}
+                      onChange={(e) => setNewAdminPin(e.target.value.replace(/\D/g, ''))}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #CBD5E1',
+                      }}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={currentAdminPin.length < 6 || newAdminPin.length !== 6}
+                    style={{
+                      marginTop: '6px',
+                      padding: '12px',
+                      backgroundColor: '#2563EB',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Simpan Perubahan PIN Admin
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 4. MODAL DESKTOP IMPOR SOAL JSON (Side-by-Side View) */}
       {isImportModalOpen && (
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            backgroundColor: 'rgba(32, 36, 44, 0.75)',
+            backgroundColor: 'rgba(15, 23, 42, 0.7)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 1100,
-            padding: '20px',
+            zIndex: 100000,
+            padding: '30px',
           }}
         >
           <div
-            className="card"
             style={{
               width: '100%',
-              maxWidth: '600px',
+              maxWidth: '880px',
               maxHeight: '90vh',
-              overflowY: 'auto',
-              padding: '20px',
-              backgroundColor: 'var(--color-paper)',
+              backgroundColor: '#FFFFFF',
+              borderRadius: '16px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '14px',
+              overflow: 'hidden',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ fontSize: '1.125rem', fontWeight: 800 }}>
-                Impor Bank Soal JSON (v1.0)
-              </h3>
+            {/* Header Modal */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '16px 24px',
+                borderBottom: '1px solid #E2E8F0',
+                backgroundColor: '#F8FAFC',
+              }}
+            >
+              <div>
+                <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1E293B' }}>
+                  Impor Berkas Bank Soal JSON (v1.0)
+                </h3>
+                <span style={{ fontSize: '0.75rem', color: '#64748B' }}>
+                  Format kompatibel dengan hasil generasi AI eksternal (ChatGPT/Gemini)
+                </span>
+              </div>
               <button
                 onClick={() => {
                   setIsImportModalOpen(false);
                   setValidationReport(null);
                   setImportStatus(null);
                 }}
-                style={{ background: 'none', border: 'none', fontSize: '1.25rem', cursor: 'pointer' }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.25rem',
+                  cursor: 'pointer',
+                  color: '#94A3B8',
+                }}
               >
                 ✕
               </button>
             </div>
 
-            <p style={{ fontSize: '0.8125rem', color: 'var(--color-muted)' }}>
-              Tempel berkas JSON yang dihasilkan oleh AI eksternal (ChatGPT/Gemini) sesuai kontrak <code>docs/question-bank-schema-v1.md</code>.
-            </p>
+            {/* Isi Editor & Preview */}
+            <div style={{ padding: '20px 24px', flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <p style={{ fontSize: '0.8125rem', color: '#475569' }}>
+                Tempel format JSON sesuai kontrak schema di <code>docs/question-bank-schema-v1.md</code>. Sistem akan memvalidasi keutuhan schema, ID unik, dan referensi kunci jawaban sebelum disimpan ke status <strong>draft</strong>.
+              </p>
 
-            <textarea
-              rows={8}
-              value={importJsonText}
-              onChange={(e) => setImportJsonText(e.target.value)}
-              placeholder={`{\n  "schema_version": "1.0",\n  "subject": "mathematics",\n  "education_level": "SD_1",\n  "semester": 1,\n  "topic": "addition",\n  "difficulty": 1,\n  "questions": [ ... ]\n}`}
+              <textarea
+                rows={12}
+                value={importJsonText}
+                onChange={(e) => setImportJsonText(e.target.value)}
+                placeholder={`{\n  "schema_version": "1.0",\n  "subject": "mathematics",\n  "education_level": "SD_1",\n  "semester": 1,\n  "topic": "addition",\n  "difficulty": 1,\n  "questions": [\n    {\n      "question_id": "MATH-SD1-S1-NEW",\n      "type": "multiple_choice",\n      "question": "Berapakah 5 + 5?",\n      "options": [\n        { "id": "A", "text": "9" },\n        { "id": "B", "text": "10" },\n        { "id": "C", "text": "11" }\n      ],\n      "correct_answer": "B",\n      "explanation": "Lima ditambah lima sama dengan sepuluh.",\n      "tags": ["addition"]\n    }\n  ]\n}`}
+                style={{
+                  width: '100%',
+                  padding: '12px 14px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.8125rem',
+                  borderRadius: '8px',
+                  border: '1.5px solid #CBD5E1',
+                  backgroundColor: '#0F172A',
+                  color: '#F8FAFC',
+                  lineHeight: 1.5,
+                }}
+              />
+
+              {importStatus && (
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '8px',
+                    backgroundColor: importStatus.startsWith('✅') ? '#DCFCE7' : '#FEE2E2',
+                    color: importStatus.startsWith('✅') ? '#15803D' : '#991B1B',
+                    fontSize: '0.8125rem',
+                    fontWeight: 700,
+                  }}
+                >
+                  {importStatus}
+                </div>
+              )}
+
+              {validationReport && (
+                <div
+                  style={{
+                    padding: '14px',
+                    borderRadius: '8px',
+                    backgroundColor: validationReport.is_valid ? '#DCFCE7' : '#FEE2E2',
+                    fontSize: '0.8125rem',
+                  }}
+                >
+                  <strong style={{ color: validationReport.is_valid ? '#15803D' : '#991B1B' }}>
+                    {validationReport.is_valid
+                      ? `✓ Format Valid! Total ${validationReport.total_questions} soal siap diimpor sebagai draft.`
+                      : `✕ Validasi Gagal: Ditemukan ${validationReport.errors.length} masalah.`}
+                  </strong>
+                  {!validationReport.is_valid && (
+                    <ul style={{ marginTop: '8px', paddingLeft: '18px', color: '#991B1B' }}>
+                      {validationReport.errors.map((err: any, idx: number) => (
+                        <li key={idx} style={{ marginTop: '4px' }}>
+                          <code>{err.field}</code>: {err.message}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer Modal */}
+            <div
               style={{
-                width: '100%',
-                padding: '12px',
-                fontFamily: 'monospace',
-                fontSize: '0.8125rem',
-                borderRadius: 'var(--radius-input)',
-                border: '1.5px solid var(--color-border)',
-                backgroundColor: 'var(--color-canvas)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                padding: '14px 24px',
+                borderTop: '1px solid #E2E8F0',
+                backgroundColor: '#F8FAFC',
+                gap: '10px',
               }}
-            />
-
-            {importStatus && (
-              <div
-                style={{
-                  padding: '10px 12px',
-                  borderRadius: 'var(--radius-xs)',
-                  backgroundColor: importStatus.startsWith('✅') ? 'var(--color-mint-soft)' : 'var(--color-danger-soft)',
-                  fontSize: '0.8125rem',
-                  fontWeight: 700,
-                }}
-              >
-                {importStatus}
-              </div>
-            )}
-
-            {validationReport && (
-              <div
-                style={{
-                  padding: '12px',
-                  borderRadius: 'var(--radius-sm)',
-                  backgroundColor: validationReport.is_valid ? 'var(--color-mint-soft)' : 'var(--color-danger-soft)',
-                  fontSize: '0.8125rem',
-                }}
-              >
-                <strong>Hasil Validasi: </strong>
-                {validationReport.is_valid
-                  ? `Lulus Validasi! Total ${validationReport.total_questions} soal valid.`
-                  : `Ditemukan ${validationReport.errors.length} kesalahan validasi:`}
-                {!validationReport.is_valid && (
-                  <ul style={{ marginTop: '6px', paddingLeft: '18px' }}>
-                    {validationReport.errors.map((err: any, idx: number) => (
-                      <li key={idx}>
-                        <code>{err.field}</code>: {err.message}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '10px' }}>
+            >
               <button
                 type="button"
-                className="btn-secondary"
                 onClick={handleValidateJson}
                 disabled={!importJsonText.trim()}
-                style={{ minHeight: '38px', fontSize: '0.8125rem' }}
+                style={{
+                  padding: '9px 16px',
+                  backgroundColor: '#FFFFFF',
+                  border: '1px solid #CBD5E1',
+                  borderRadius: '8px',
+                  fontSize: '0.8125rem',
+                  fontWeight: 700,
+                  color: '#334155',
+                  cursor: importJsonText.trim() ? 'pointer' : 'not-allowed',
+                }}
               >
-                🔍 Uji Validasi
+                🔍 Uji Validasi Format
               </button>
+
               <button
                 type="button"
-                className="btn-primary"
                 onClick={handleImportJson}
                 disabled={!validationReport?.is_valid}
-                style={{ minHeight: '38px', fontSize: '0.8125rem' }}
+                style={{
+                  padding: '9px 20px',
+                  backgroundColor: validationReport?.is_valid ? '#2563EB' : '#94A3B8',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '0.8125rem',
+                  fontWeight: 800,
+                  cursor: validationReport?.is_valid ? 'pointer' : 'not-allowed',
+                }}
               >
-                💾 Simpan sebagai Draft
+                💾 Simpan Soal ke Draft
               </button>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };
