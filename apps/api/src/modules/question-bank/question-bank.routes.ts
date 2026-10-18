@@ -202,10 +202,10 @@ export async function questionBankRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // 10. Atur penempatan level dan topik untuk soal
+  // 10. Atur penempatan level, topik, dan semester untuk soal
   app.post<{
     Params: { id: string };
-    Body: { topic_id?: string | null; level_id?: string | null };
+    Body: { topic_id?: string | null; level_id?: string | null; semester?: 1 | 2 };
   }>(
     '/api/admin/questions/:id/assign-level',
     {
@@ -220,6 +220,7 @@ export async function questionBankRoutes(app: FastifyInstance): Promise<void> {
           properties: {
             topic_id: { type: ['string', 'null'] },
             level_id: { type: ['string', 'null'] },
+            semester: { type: 'integer', enum: [1, 2] },
           },
         },
       },
@@ -229,7 +230,8 @@ export async function questionBankRoutes(app: FastifyInstance): Promise<void> {
         const result = QuestionBankService.assignQuestionLevel(
           req.params.id,
           req.body.topic_id ?? null,
-          req.body.level_id ?? null
+          req.body.level_id ?? null,
+          req.body.semester
         );
         return reply.send({
           success: true,
@@ -238,6 +240,50 @@ export async function questionBankRoutes(app: FastifyInstance): Promise<void> {
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Gagal mengatur level soal';
+        return reply.status(400).send({ success: false, message });
+      }
+    }
+  );
+
+  // 11. Ubah semester soal
+  app.post<{
+    Params: { id: string };
+    Body: { semester: 1 | 2; topic_id?: string | null; level_id?: string | null };
+  }>(
+    '/api/admin/questions/:id/update-semester',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string' } },
+        },
+        body: {
+          type: 'object',
+          required: ['semester'],
+          properties: {
+            semester: { type: 'integer', enum: [1, 2] },
+            topic_id: { type: ['string', 'null'] },
+            level_id: { type: ['string', 'null'] },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      try {
+        const result = QuestionBankService.updateQuestionSemester(
+          req.params.id,
+          req.body.semester,
+          req.body.topic_id,
+          req.body.level_id
+        );
+        return reply.send({
+          success: true,
+          message: `Semester soal berhasil diubah menjadi Semester ${req.body.semester}`,
+          data: result,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Gagal mengubah semester soal';
         return reply.status(400).send({ success: false, message });
       }
     }

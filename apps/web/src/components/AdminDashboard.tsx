@@ -124,15 +124,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const [totalQuestions, setTotalQuestions] = useState(0);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [levelFilter, setLevelFilter] = useState<string>('all');
+  const [semesterFilter, setSemesterFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
 
-  // Atur Level Soal State (Bank Soal -> Level)
+  // Atur Level & Semester Soal State (Bank Soal -> Level)
   const [assignLevelQuestion, setAssignLevelQuestion] = useState<QuestionItem | null>(null);
+  const [selectedSemesterForAssign, setSelectedSemesterForAssign] = useState<1 | 2>(1);
   const [selectedTopicIdForAssign, setSelectedTopicIdForAssign] = useState<string>('');
   const [selectedLevelIdForAssign, setSelectedLevelIdForAssign] = useState<string>('');
   const [isSavingAssignLevel, setIsSavingAssignLevel] = useState(false);
   const [assignLevelMsg, setAssignLevelMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Quick Switch Semester Confirm Modal
+  const [quickSemesterConfirm, setQuickSemesterConfirm] = useState<{
+    question: QuestionItem;
+    targetSemester: 1 | 2;
+  } | null>(null);
+  const [isUpdatingSemester, setIsUpdatingSemester] = useState(false);
 
   // Kelola Soal per Level State (Jalur & Kurikulum -> Soal Level)
   const [managingLevel, setManagingLevel] = useState<{ level: AdminLevel; topic: AdminTopic } | null>(null);
@@ -186,6 +195,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     const params = new URLSearchParams();
     if (statusFilter !== 'all') params.append('status', statusFilter);
     if (levelFilter !== 'all') params.append('education_level', levelFilter);
+    if (semesterFilter !== 'all') params.append('semester', semesterFilter);
     params.append('limit', '100');
 
     fetch(`/api/admin/questions?${params.toString()}`, { credentials: 'include' })
@@ -310,6 +320,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     activeTab,
     statusFilter,
     levelFilter,
+    semesterFilter,
     leaderboardPeriod,
     leaderboardGradeFilter,
     curriculumGradeFilter,
@@ -496,35 +507,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     }
   };
 
-  // Handle Buka Modal Atur Level Soal
+  // Handle Buka Modal Atur Level & Semester Soal
   const handleOpenAssignLevel = (q: QuestionItem) => {
     setAssignLevelQuestion(q);
+    setSelectedSemesterForAssign((q.semester === 2 ? 2 : 1) as 1 | 2);
     setSelectedTopicIdForAssign(q.topic_id || '');
     setSelectedLevelIdForAssign(q.level_id || '');
     setAssignLevelMsg(null);
   };
 
-  // Handle Simpan Penempatan Level Soal
-  const handleSaveQuestionLevel = async (customTopicId?: string | null, customLevelId?: string | null) => {
+  // Handle Simpan Penempatan Level & Semester Soal
+  const handleSaveQuestionLevel = async (
+    customTopicId?: string | null,
+    customLevelId?: string | null,
+    customSemester?: 1 | 2
+  ) => {
     if (!assignLevelQuestion) return;
     setIsSavingAssignLevel(true);
     setAssignLevelMsg(null);
     try {
       const topicToSave = customTopicId !== undefined ? customTopicId : (selectedTopicIdForAssign || null);
       const levelToSave = customLevelId !== undefined ? customLevelId : (selectedLevelIdForAssign || null);
+      const semesterToSave = customSemester !== undefined ? customSemester : selectedSemesterForAssign;
 
       const res = await fetch(`/api/admin/questions/${assignLevelQuestion.id || assignLevelQuestion.question_id}/assign-level`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
+          semester: semesterToSave,
           topic_id: topicToSave,
           level_id: levelToSave,
         }),
       });
       const data = await res.json();
       if (data.success) {
-        setAssignLevelMsg({ type: 'success', text: 'Penempatan level soal berhasil diperbarui!' });
+        setAssignLevelMsg({ type: 'success', text: 'Penempatan level & semester soal berhasil disimpan!' });
         fetchQuestions();
         fetchCurriculum();
         setTimeout(() => {
@@ -538,6 +556,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
       setAssignLevelMsg({ type: 'error', text: 'Terjadi kesalahan jaringan' });
     } finally {
       setIsSavingAssignLevel(false);
+    }
+  };
+
+  // Handle Ganti Semester Cepat
+  const handleQuickUpdateSemester = async (questionId: string, newSemester: 1 | 2) => {
+    setIsUpdatingSemester(true);
+    try {
+      const res = await fetch(`/api/admin/questions/${questionId}/update-semester`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ semester: newSemester }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchQuestions();
+        fetchCurriculum();
+        setQuickSemesterConfirm(null);
+      } else {
+        alert(data.message || 'Gagal mengubah semester');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Terjadi kesalahan jaringan');
+    } finally {
+      setIsUpdatingSemester(false);
     }
   };
 
@@ -3072,6 +3116,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                       ))}
                     </select>
                   </div>
+
+                  {/* Filter Semester */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#64748B' }}>Semester:</span>
+                    <select
+                      value={semesterFilter}
+                      onChange={(e) => setSemesterFilter(e.target.value)}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #CBD5E1',
+                        fontSize: '0.8125rem',
+                        backgroundColor: '#FFFFFF',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <option value="all">Semua Semester</option>
+                      <option value="1">📘 Semester 1</option>
+                      <option value="2">📙 Semester 2</option>
+                    </select>
+                  </div>
                 </div>
 
                 {/* Tombol Impor & Ekspor */}
@@ -3160,14 +3225,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                             transition: 'background-color 0.1s ease',
                           }}
                         >
-                          {/* 1. Kode Soal */}
+                          {/* 1. Kode Soal & Semester */}
                           <td style={{ padding: '14px 18px', verticalAlign: 'top' }}>
                             <div style={{ fontWeight: 800, color: '#2563EB', fontFamily: 'monospace' }}>
                               {q.question_id}
                             </div>
-                            <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>
-                              Semester {q.semester}
-                            </span>
+                            <div style={{ marginTop: '5px' }}>
+                              <button
+                                type="button"
+                                onClick={() => setQuickSemesterConfirm({ question: q, targetSemester: q.semester === 1 ? 2 : 1 })}
+                                title={`Klik untuk mengganti soal ini ke Semester ${q.semester === 1 ? 2 : 1}`}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  border: '1px solid',
+                                  borderColor: q.semester === 1 ? '#BFDBFE' : '#FBCFE8',
+                                  backgroundColor: q.semester === 1 ? '#EFF6FF' : '#FDF2F8',
+                                  color: q.semester === 1 ? '#1D4ED8' : '#BE185D',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                }}
+                              >
+                                <span>{q.semester === 1 ? '📘' : '📙'} Sem {q.semester}</span>
+                                <span style={{ fontSize: '0.6875rem', opacity: 0.8 }}>⇄ Ganti</span>
+                              </button>
+                            </div>
                           </td>
 
                           {/* 2. Jenjang */}
@@ -4727,10 +4814,71 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                 </div>
               )}
 
+              {/* Form Pemilihan Semester */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                  Pilih Semester:
+                </label>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSemesterForAssign(1);
+                      setSelectedLevelIdForAssign('');
+                      setSelectedTopicIdForAssign('');
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: selectedSemesterForAssign === 1 ? '2px solid #2563EB' : '1.5px solid #CBD5E1',
+                      backgroundColor: selectedSemesterForAssign === 1 ? '#EFF6FF' : '#FFFFFF',
+                      color: selectedSemesterForAssign === 1 ? '#1D4ED8' : '#475569',
+                      fontWeight: selectedSemesterForAssign === 1 ? 800 : 600,
+                      fontSize: '0.8125rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <span>📘 Semester 1</span>
+                    {selectedSemesterForAssign === 1 && <span>✓</span>}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSemesterForAssign(2);
+                      setSelectedLevelIdForAssign('');
+                      setSelectedTopicIdForAssign('');
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: selectedSemesterForAssign === 2 ? '2px solid #DB2777' : '1.5px solid #CBD5E1',
+                      backgroundColor: selectedSemesterForAssign === 2 ? '#FDF2F8' : '#FFFFFF',
+                      color: selectedSemesterForAssign === 2 ? '#BE185D' : '#475569',
+                      fontWeight: selectedSemesterForAssign === 2 ? 800 : 600,
+                      fontSize: '0.8125rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <span>📙 Semester 2</span>
+                    {selectedSemesterForAssign === 2 && <span>✓</span>}
+                  </button>
+                </div>
+              </div>
+
               {/* Form Pemilihan Level */}
               <div>
                 <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
-                  Pilih Level Petualangan Tujuan:
+                  Pilih Level Petualangan Tujuan (Semester {selectedSemesterForAssign}):
                 </label>
                 <select
                   value={selectedLevelIdForAssign}
@@ -4762,7 +4910,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                     .filter(
                       (t) =>
                         t.education_level === assignLevelQuestion.education_level &&
-                        t.semester === assignLevelQuestion.semester
+                        t.semester === selectedSemesterForAssign
                     )
                     .map((t) => (
                       <optgroup key={t.id} label={`📚 ${t.name}`}>
@@ -4806,7 +4954,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                       .filter(
                         (t) =>
                           t.education_level === assignLevelQuestion.education_level &&
-                          t.semester === assignLevelQuestion.semester
+                          t.semester === selectedSemesterForAssign
                       )
                       .map((t) => (
                         <option key={t.id} value={t.id}>
@@ -4834,7 +4982,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
             >
               <button
                 type="button"
-                onClick={() => handleSaveQuestionLevel(null, null)}
+                onClick={() => handleSaveQuestionLevel(null, null, selectedSemesterForAssign)}
                 disabled={isSavingAssignLevel}
                 style={{
                   padding: '8px 14px',
@@ -4883,9 +5031,153 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                     cursor: 'pointer',
                   }}
                 >
-                  {isSavingAssignLevel ? 'Menyimpan...' : 'Simpan Level 💾'}
+                  {isSavingAssignLevel ? 'Menyimpan...' : 'Simpan Perubahan 💾'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODAL KONFIRMASI CEPAT GANTI SEMESTER
+          ======================================================== */}
+      {quickSemesterConfirm && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100000,
+            padding: '20px',
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '460px',
+              backgroundColor: '#FFFFFF',
+              borderRadius: '16px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ padding: '20px 24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+                <div
+                  style={{
+                    width: '44px',
+                    height: '44px',
+                    borderRadius: '12px',
+                    backgroundColor: quickSemesterConfirm.targetSemester === 1 ? '#EFF6FF' : '#FDF2F8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '1.4rem',
+                    flexShrink: 0,
+                  }}
+                >
+                  {quickSemesterConfirm.targetSemester === 1 ? '📘' : '📙'}
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1E293B', margin: 0 }}>
+                    Pindahkan ke Semester {quickSemesterConfirm.targetSemester}?
+                  </h3>
+                  <span style={{ fontSize: '0.75rem', color: '#64748B' }}>
+                    Kode Soal: <strong>{quickSemesterConfirm.question.question_id}</strong>
+                  </span>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: '12px',
+                  backgroundColor: '#F8FAFC',
+                  borderRadius: '8px',
+                  border: '1px solid #E2E8F0',
+                  fontSize: '0.8125rem',
+                  color: '#334155',
+                  marginBottom: '14px',
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: '4px' }}>
+                  {quickSemesterConfirm.question.question}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#64748B' }}>
+                  Semester saat ini: <strong>Semester {quickSemesterConfirm.question.semester}</strong> → Berubah ke: <strong style={{ color: quickSemesterConfirm.targetSemester === 1 ? '#1D4ED8' : '#BE185D' }}>Semester {quickSemesterConfirm.targetSemester}</strong>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: '10px 12px',
+                  backgroundColor: '#FFFBEB',
+                  borderRadius: '8px',
+                  border: '1px solid #FDE68A',
+                  fontSize: '0.75rem',
+                  color: '#B45309',
+                  lineHeight: 1.4,
+                }}
+              >
+                ℹ️ Jika soal ini sebelumnya terhubung ke level tertentu pada Semester {quickSemesterConfirm.question.semester}, keterkaitan level lama akan otomatis dilepaskan agar konsisten dengan kurikulum Semester {quickSemesterConfirm.targetSemester}.
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                padding: '12px 24px',
+                borderTop: '1px solid #E2E8F0',
+                backgroundColor: '#F8FAFC',
+                gap: '8px',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setQuickSemesterConfirm(null)}
+                disabled={isUpdatingSemester}
+                style={{
+                  padding: '8px 14px',
+                  backgroundColor: '#FFFFFF',
+                  border: '1px solid #CBD5E1',
+                  borderRadius: '8px',
+                  fontSize: '0.8125rem',
+                  fontWeight: 700,
+                  color: '#475569',
+                  cursor: 'pointer',
+                }}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleQuickUpdateSemester(
+                    quickSemesterConfirm.question.id || quickSemesterConfirm.question.question_id,
+                    quickSemesterConfirm.targetSemester
+                  )
+                }
+                disabled={isUpdatingSemester}
+                style={{
+                  padding: '8px 18px',
+                  backgroundColor: quickSemesterConfirm.targetSemester === 1 ? '#2563EB' : '#DB2777',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '0.8125rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                {isUpdatingSemester ? 'Menyimpan...' : `Ya, Ubah ke Sem ${quickSemesterConfirm.targetSemester}`}
+              </button>
             </div>
           </div>
         </div>

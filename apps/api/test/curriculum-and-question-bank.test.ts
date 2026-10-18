@@ -438,5 +438,46 @@ describe('Curriculum & Question Bank Engine', () => {
     });
     assert.strictEqual(addBackRes.statusCode, 200);
   });
+
+  test('Admin Update Question Semester (Ganti Semester Soal)', async () => {
+    // 1. Update semester from 1 to 2
+    const updateSemRes = await app.inject({
+      method: 'POST',
+      url: `/api/admin/questions/${testQuestionId}/update-semester`,
+      payload: { semester: 2 },
+    });
+    assert.strictEqual(updateSemRes.statusCode, 200);
+    const body = JSON.parse(updateSemRes.payload);
+    assert.strictEqual(body.success, true);
+    assert.strictEqual(body.data.semester, 2);
+
+    const db = getDb();
+    let row = db
+      .prepare('SELECT semester, topic_id, level_id FROM questions WHERE question_id = ?')
+      .get(testQuestionId) as { semester: number; topic_id: string | null; level_id: string | null };
+    assert.strictEqual(row.semester, 2);
+    // Karena levelRow lama berasal dari semester 1, level_id harus otomatis di-reset saat pindah semester
+    assert.strictEqual(row.level_id, null);
+
+    // 2. Reject invalid semester value
+    const invalidSemRes = await app.inject({
+      method: 'POST',
+      url: `/api/admin/questions/${testQuestionId}/update-semester`,
+      payload: { semester: 3 },
+    });
+    assert.strictEqual(invalidSemRes.statusCode, 400);
+
+    // 3. Update back to semester 1
+    const backToSem1Res = await app.inject({
+      method: 'POST',
+      url: `/api/admin/questions/${testQuestionId}/update-semester`,
+      payload: { semester: 1 },
+    });
+    assert.strictEqual(backToSem1Res.statusCode, 200);
+    row = db
+      .prepare('SELECT semester FROM questions WHERE question_id = ?')
+      .get(testQuestionId) as { semester: number };
+    assert.strictEqual(row.semester, 1);
+  });
 });
 

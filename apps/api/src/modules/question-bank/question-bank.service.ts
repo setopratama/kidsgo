@@ -437,32 +437,136 @@ export class QuestionBankService {
   }
 
   /**
-   * Atur penempatan level dan topik untuk satu soal
+   * Atur penempatan level, topik, dan opsional semester untuk satu soal
    */
-  static assignQuestionLevel(questionId: string, topicId: string | null, levelId: string | null) {
+  static assignQuestionLevel(
+    questionId: string,
+    topicId: string | null,
+    levelId: string | null,
+    semester?: 1 | 2
+  ) {
     const db = getDb();
-    const q = db.prepare('SELECT id FROM questions WHERE id = ? OR question_id = ?').get(questionId, questionId) as { id: string } | undefined;
+    const q = db
+      .prepare('SELECT id, semester FROM questions WHERE id = ? OR question_id = ?')
+      .get(questionId, questionId) as { id: string; semester: number } | undefined;
     if (!q) {
       throw new Error('Soal tidak ditemukan');
     }
 
     let finalTopicId = topicId;
+    let finalSemester = semester !== undefined ? semester : q.semester;
+
     if (levelId) {
-      const lvl = db.prepare('SELECT id, topic_id FROM levels WHERE id = ?').get(levelId) as { id: string; topic_id: string } | undefined;
+      const lvl = db
+        .prepare(`
+          SELECT l.id, l.topic_id, t.semester 
+          FROM levels l 
+          JOIN topics t ON l.topic_id = t.id 
+          WHERE l.id = ?
+        `)
+        .get(levelId) as { id: string; topic_id: string; semester: number } | undefined;
       if (!lvl) {
         throw new Error('Level tidak ditemukan');
       }
       finalTopicId = lvl.topic_id;
+      finalSemester = lvl.semester;
     }
 
     const now = new Date().toISOString();
     db.prepare(`
       UPDATE questions 
-      SET topic_id = ?, level_id = ?, updated_at = ?
+      SET semester = ?, topic_id = ?, level_id = ?, updated_at = ?
       WHERE id = ?
-    `).run(finalTopicId, levelId, now, q.id);
+    `).run(finalSemester, finalTopicId, levelId, now, q.id);
 
-    return { id: q.id, topic_id: finalTopicId, level_id: levelId };
+    return { id: q.id, semester: finalSemester, topic_id: finalTopicId, level_id: levelId };
+  }
+
+  /**
+   * Mengubah semester soal (dan menyesuaikan/mereset topik & level jika semester berubah)
+   */
+  static updateQuestionSemester(
+    questionId: string,
+    newSemester: 1 | 2,
+    topicId?: string | null,
+    levelId?: string | null
+  ) {
+    if (newSemester !== 1 && newSemester !== 2) {
+      throw new Error('Semester harus bernilai 1 atau 2.');
+    }
+
+    const db = getDb();
+    const q = db
+      .prepare('SELECT id, semester, topic_id, level_id FROM questions WHERE id = ? OR question_id = ?')
+      .get(questionId, questionId) as {
+        id: string;
+        semester: number;
+        topic_id: string | null;
+        level_id: string | null;
+      } | undefined;
+
+    if (!q) {
+      throw new Error('Soal tidak ditemukan');
+    }
+
+    let finalTopicId = topicId !== undefined ? topicId : (q.semester !== newSemester ? null : q.topic_id);
+    let finalLevelId = levelId !== undefined ? levelId : (q.semester !== newSemester ? null : q.level_id);
+
+    if (finalLevelId) {
+      const lvl = db
+        .prepare(`
+          SELECT l.id, l.topic_id, t.semester 
+          FROM levels l 
+          JOIN topics t ON l.topic_id = t.id 
+          WHERE l.id = ?
+        `)
+        .get(finalLevelId) as { id: string; topic_id: string; semester: number } | undefined;
+
+      if (!lvl) {
+        throw new Error('Level tidak ditemukan');
+      }
+      if (lvl.semester !== newSemester) {
+        throw new Error(`Level yang dipilih berada di Semester ${lvl.semester}, tidak cocok dengan Semester ${newSemester}.`);
+      }
+      finalTopicId = lvl.topic_id;
+    } else if (finalTopicId) {
+      const topic = db
+        .prepare('SELECT id, semester FROM topics WHERE id = ?')
+        .get(finalTopicId) as { id: string; semester: number } | undefined;
+
+      if (!topic || topic.semester !== newSemester) {
+        finalTopicId = null;
+      }
+    }
+
+    // Jika semester berubah dan topik/level tidak ditentukan secara eksplisit, periksa validitas topik/level lama
+    if (q.semester !== newSemester && topicId === undefined && levelId === undefined) {
+      if (q.topic_id) {
+        const topic = db
+          .prepare('SELECT id, semester FROM topics WHERE id = ?')
+          .get(q.topic_id) as { id: string; semester: number } | undefined;
+        if (!topic || topic.semester !== newSemester) {
+          finalTopicId = null;
+          finalLevelId = null;
+        }
+      } else {
+        finalLevelId = null;
+      }
+    }
+
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE questions 
+      SET semester = ?, topic_id = ?, level_id = ?, updated_at = ?
+      WHERE id = ?
+    `).run(newSemester, finalTopicId, finalLevelId, now, q.id);
+
+    return {
+      id: q.id,
+      semester: newSemester,
+      topic_id: finalTopicId,
+      level_id: finalLevelId,
+    };
   }
 
   /**
