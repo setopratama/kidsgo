@@ -39,6 +39,30 @@ export type SemesterNumber = 1 | 2;
 
 export type SubjectCode = 'mathematics';
 
+export interface TopicItem {
+  id: string;
+  subject: SubjectCode | string;
+  education_level: EducationLevel;
+  semester: SemesterNumber;
+  name: string;
+  slug: string;
+  order_index: number;
+  total_levels?: number;
+  total_questions?: number;
+  created_at: string;
+}
+
+export interface LevelItem {
+  id: string;
+  topic_id: string;
+  level_number: number;
+  name: string;
+  required_xp: number;
+  passing_score: number;
+  total_questions?: number;
+  created_at: string;
+}
+
 // ==========================================
 // 2. Bank Soal & Schema v1.0
 // ==========================================

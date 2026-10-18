@@ -10,17 +10,19 @@ process.env.NODE_ENV = 'test';
 import { buildServer } from '../src/server.js';
 import { runMigrations } from '../src/db/migrate.js';
 import { seedCurriculum } from '../src/db/seed.js';
+import { AuthService } from '../src/modules/auth/auth.service.js';
 import { closeDb, getDb } from '../src/db/index.js';
 import { QuestionBankFile } from '@kidsgo/shared';
 
 describe('Curriculum & Question Bank Engine', () => {
   const app = buildServer();
 
-  before(() => {
+  before(async () => {
     closeDb();
     process.env.DATABASE_PATH = testDbPath;
     runMigrations();
     seedCurriculum();
+    await AuthService.bootstrapAdmin();
   });
 
   after(async () => {
@@ -232,5 +234,117 @@ describe('Curriculum & Question Bank Engine', () => {
     assert.strictEqual(exported.semester, 1);
     assert.ok(Array.isArray(exported.questions));
     assert.ok(exported.questions.some((q) => q.question_id === testQuestionId));
+  });
+
+  test('Admin Curriculum CRUD: Topic & Level management', async () => {
+    // 1. Unauthenticated request should be rejected (401)
+    const unauthRes = await app.inject({
+      method: 'GET',
+      url: '/api/admin/curriculum/overview',
+    });
+    assert.strictEqual(unauthRes.statusCode, 401);
+
+    // 2. Login as admin to get cookie
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/login',
+      payload: { pin: '123456' },
+    });
+    assert.strictEqual(loginRes.statusCode, 200);
+    const adminCookie = loginRes.cookies.find((c) => c.name === 'kidsgo_admin_token');
+    assert.ok(adminCookie);
+
+    const authHeaders = {
+      cookie: `kidsgo_admin_token=${adminCookie.value}`,
+    };
+
+    // 3. Create a new topic
+    const createTopicRes = await app.inject({
+      method: 'POST',
+      url: '/api/admin/curriculum/topics',
+      headers: authHeaders,
+      payload: {
+        education_level: 'SD_1',
+        semester: 1,
+        name: 'Mengenal Bangun Ruang Sederhana',
+      },
+    });
+    assert.strictEqual(createTopicRes.statusCode, 201);
+    const topicBody = JSON.parse(createTopicRes.payload);
+    assert.strictEqual(topicBody.success, true);
+    assert.strictEqual(topicBody.data.name, 'Mengenal Bangun Ruang Sederhana');
+    const createdTopicId = topicBody.data.id;
+
+    // 4. Create a new level in this topic
+    const createLevelRes = await app.inject({
+      method: 'POST',
+      url: `/api/admin/curriculum/topics/${createdTopicId}/levels`,
+      headers: authHeaders,
+      payload: {
+        name: 'Balok dan Kubus Ceria',
+        level_number: 1,
+        required_xp: 45,
+      },
+    });
+    assert.strictEqual(createLevelRes.statusCode, 201);
+    const levelBody = JSON.parse(createLevelRes.payload);
+    assert.strictEqual(levelBody.success, true);
+    assert.strictEqual(levelBody.data.name, 'Balok dan Kubus Ceria');
+    assert.strictEqual(levelBody.data.required_xp, 45);
+    const createdLevelId = levelBody.data.id;
+
+    // 5. Update level
+    const updateLevelRes = await app.inject({
+      method: 'PUT',
+      url: `/api/admin/curriculum/levels/${createdLevelId}`,
+      headers: authHeaders,
+      payload: {
+        name: 'Balok, Kubus, dan Bola Ceria',
+        required_xp: 60,
+      },
+    });
+    assert.strictEqual(updateLevelRes.statusCode, 200);
+    const updatedLevelBody = JSON.parse(updateLevelRes.payload);
+    assert.strictEqual(updatedLevelBody.data.name, 'Balok, Kubus, dan Bola Ceria');
+    assert.strictEqual(updatedLevelBody.data.required_xp, 60);
+
+    // 6. Update topic
+    const updateTopicRes = await app.inject({
+      method: 'PUT',
+      url: `/api/admin/curriculum/topics/${createdTopicId}`,
+      headers: authHeaders,
+      payload: {
+        name: 'Geometri dan Bangun Ruang',
+      },
+    });
+    assert.strictEqual(updateTopicRes.statusCode, 200);
+    const updatedTopicBody = JSON.parse(updateTopicRes.payload);
+    assert.strictEqual(updatedTopicBody.data.name, 'Geometri dan Bangun Ruang');
+
+    // 7. Get curriculum overview
+    const overviewRes = await app.inject({
+      method: 'GET',
+      url: '/api/admin/curriculum/overview?grade=SD_1&semester=1',
+      headers: authHeaders,
+    });
+    assert.strictEqual(overviewRes.statusCode, 200);
+    const overviewBody = JSON.parse(overviewRes.payload);
+    assert.ok(overviewBody.data.some((t: any) => t.id === createdTopicId));
+
+    // 8. Delete level
+    const deleteLevelRes = await app.inject({
+      method: 'DELETE',
+      url: `/api/admin/curriculum/levels/${createdLevelId}`,
+      headers: authHeaders,
+    });
+    assert.strictEqual(deleteLevelRes.statusCode, 200);
+
+    // 9. Delete topic
+    const deleteTopicRes = await app.inject({
+      method: 'DELETE',
+      url: `/api/admin/curriculum/topics/${createdTopicId}`,
+      headers: authHeaders,
+    });
+    assert.strictEqual(deleteTopicRes.statusCode, 200);
   });
 });

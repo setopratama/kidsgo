@@ -32,6 +32,29 @@ interface PlayerItem {
   created_at: string;
 }
 
+interface AdminLevel {
+  id: string;
+  topic_id: string;
+  level_number: number;
+  name: string;
+  required_xp: number;
+  passing_score: number;
+  total_questions: number;
+}
+
+interface AdminTopic {
+  id: string;
+  subject: string;
+  education_level: string;
+  semester: number;
+  name: string;
+  slug: string;
+  order_index: number;
+  total_levels: number;
+  total_questions: number;
+  levels: AdminLevel[];
+}
+
 interface AdminDashboardProps {
   onClose: () => void;
 }
@@ -42,10 +65,54 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Navigasi Menu Sisi Kiri (Sidebar): 'overview' | 'questions' | 'import' | 'players' | 'leaderboard' | 'settings'
+  // Navigasi Menu Sisi Kiri (Sidebar): 'overview' | 'curriculum' | 'questions' | 'import' | 'players' | 'leaderboard' | 'settings'
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'questions' | 'import' | 'players' | 'leaderboard' | 'settings'
+    'overview' | 'curriculum' | 'questions' | 'import' | 'players' | 'leaderboard' | 'settings'
   >('overview');
+
+  // Curriculum State
+  const [curriculumTopics, setCurriculumTopics] = useState<AdminTopic[]>([]);
+  const [isLoadingCurriculum, setIsLoadingCurriculum] = useState(false);
+  const [curriculumGradeFilter, setCurriculumGradeFilter] = useState<string>('all');
+  const [curriculumSemesterFilter, setCurriculumSemesterFilter] = useState<string>('all');
+  const [curriculumSearch, setCurriculumSearch] = useState('');
+  const [isTopicModalOpen, setIsTopicModalOpen] = useState(false);
+  const [editingTopic, setEditingTopic] = useState<AdminTopic | null>(null);
+  const [topicForm, setTopicForm] = useState<{
+    name: string;
+    education_level: string;
+    semester: number;
+    order_index: number;
+  }>({
+    name: '',
+    education_level: 'SD_1',
+    semester: 1,
+    order_index: 1,
+  });
+
+  const [isLevelModalOpen, setIsLevelModalOpen] = useState(false);
+  const [parentTopicForLevel, setParentTopicForLevel] = useState<AdminTopic | null>(null);
+  const [editingLevel, setEditingLevel] = useState<AdminLevel | null>(null);
+  const [levelForm, setLevelForm] = useState<{
+    name: string;
+    level_number: number;
+    required_xp: number;
+    passing_score: number;
+  }>({
+    name: '',
+    level_number: 1,
+    required_xp: 50,
+    passing_score: 100,
+  });
+
+  const [curriculumDeleteItem, setCurriculumDeleteItem] = useState<{
+    type: 'topic' | 'level';
+    id: string;
+    name: string;
+    topicId?: string;
+  } | null>(null);
+  const [curriculumMsg, setCurriculumMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isSavingCurriculum, setIsSavingCurriculum] = useState(false);
 
   // Bank Soal State
   const [questions, setQuestions] = useState<QuestionItem[]>([]);
@@ -160,7 +227,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
       .finally(() => setIsLoadingLeaderboard(false));
   };
 
-  // 4. Periksa sesi Admin saat pertama kali dimuat
+  // 4. Fetch data kurikulum & jalur level dari backend
+  const fetchCurriculum = (
+    grade: string = curriculumGradeFilter,
+    semester: string = curriculumSemesterFilter
+  ) => {
+    setIsLoadingCurriculum(true);
+    const params = new URLSearchParams();
+    if (grade !== 'all') params.append('grade', grade);
+    if (semester !== 'all') params.append('semester', semester);
+
+    fetch(`/api/admin/curriculum/overview?${params.toString()}`, { credentials: 'include' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.data)) {
+          setCurriculumTopics(data.data);
+        } else {
+          setCurriculumTopics([]);
+        }
+      })
+      .catch((err) => {
+        console.error('Gagal mengambil kurikulum:', err);
+        setCurriculumTopics([]);
+      })
+      .finally(() => setIsLoadingCurriculum(false));
+  };
+
+  // 5. Periksa sesi Admin saat pertama kali dimuat
   useEffect(() => {
     fetch('/api/admin/auth/me', { credentials: 'include' })
       .then((res) => {
@@ -173,21 +266,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
           fetchQuestions();
           fetchPlayers();
           fetchLeaderboard();
+          fetchCurriculum();
         }
       })
       .catch(() => setAdmin(null));
   }, []);
 
-  // 5. Update data saat tab atau filter berubah
+  // 6. Update data saat tab atau filter berubah
   useEffect(() => {
     if (admin) {
+      if (activeTab === 'curriculum' || activeTab === 'overview') {
+        fetchCurriculum(curriculumGradeFilter, curriculumSemesterFilter);
+      }
       if (activeTab === 'questions' || activeTab === 'overview') fetchQuestions();
       if (activeTab === 'players' || activeTab === 'overview') fetchPlayers();
       if (activeTab === 'leaderboard' || activeTab === 'overview') {
         fetchLeaderboard(leaderboardPeriod, leaderboardGradeFilter);
       }
     }
-  }, [admin, activeTab, statusFilter, levelFilter, leaderboardPeriod, leaderboardGradeFilter]);
+  }, [
+    admin,
+    activeTab,
+    statusFilter,
+    levelFilter,
+    leaderboardPeriod,
+    leaderboardGradeFilter,
+    curriculumGradeFilter,
+    curriculumSemesterFilter,
+  ]);
 
   // Handle Login Admin
   const handleAdminLogin = async (e: React.FormEvent) => {
@@ -217,6 +323,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
       setPinInput('');
       fetchQuestions();
       fetchPlayers();
+      fetchCurriculum();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gagal masuk sebagai admin';
       setLoginError(msg);
@@ -231,6 +338,120 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
       await fetch('/api/admin/auth/logout', { method: 'POST', credentials: 'include' });
     } finally {
       setAdmin(null);
+    }
+  };
+
+  // Handle Simpan Topik (Buat Baru atau Update)
+  const handleSaveTopic = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!topicForm.name.trim()) return;
+    setIsSavingCurriculum(true);
+    setCurriculumMsg(null);
+
+    try {
+      const url = editingTopic
+        ? `/api/admin/curriculum/topics/${editingTopic.id}`
+        : '/api/admin/curriculum/topics';
+      const method = editingTopic ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(topicForm),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCurriculumMsg({
+          type: 'success',
+          text: editingTopic
+            ? `✅ Topik "${topicForm.name}" berhasil diperbarui!`
+            : `✅ Topik baru "${topicForm.name}" berhasil ditambahkan!`,
+        });
+        setIsTopicModalOpen(false);
+        setEditingTopic(null);
+        fetchCurriculum();
+      } else {
+        setCurriculumMsg({ type: 'error', text: data.message || 'Gagal menyimpan topik.' });
+      }
+    } catch (err: unknown) {
+      setCurriculumMsg({ type: 'error', text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setIsSavingCurriculum(false);
+    }
+  };
+
+  // Handle Simpan Level (Buat Baru atau Update)
+  const handleSaveLevel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!levelForm.name.trim()) return;
+    setIsSavingCurriculum(true);
+    setCurriculumMsg(null);
+
+    try {
+      const url = editingLevel
+        ? `/api/admin/curriculum/levels/${editingLevel.id}`
+        : `/api/admin/curriculum/topics/${parentTopicForLevel?.id}/levels`;
+      const method = editingLevel ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(levelForm),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCurriculumMsg({
+          type: 'success',
+          text: editingLevel
+            ? `✅ Level "${levelForm.name}" berhasil diperbarui!`
+            : `✅ Level baru "${levelForm.name}" berhasil ditambahkan!`,
+        });
+        setIsLevelModalOpen(false);
+        setEditingLevel(null);
+        fetchCurriculum();
+      } else {
+        setCurriculumMsg({ type: 'error', text: data.message || 'Gagal menyimpan level.' });
+      }
+    } catch (err: unknown) {
+      setCurriculumMsg({ type: 'error', text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setIsSavingCurriculum(false);
+    }
+  };
+
+  // Handle Hapus Topik atau Level
+  const handleDeleteCurriculumItem = async () => {
+    if (!curriculumDeleteItem) return;
+    setIsSavingCurriculum(true);
+    setCurriculumMsg(null);
+
+    try {
+      const url =
+        curriculumDeleteItem.type === 'topic'
+          ? `/api/admin/curriculum/topics/${curriculumDeleteItem.id}`
+          : `/api/admin/curriculum/levels/${curriculumDeleteItem.id}`;
+
+      const res = await fetch(url, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCurriculumMsg({
+          type: 'success',
+          text: `✅ ${curriculumDeleteItem.type === 'topic' ? 'Topik' : 'Level'} "${curriculumDeleteItem.name}" berhasil dihapus.`,
+        });
+        setCurriculumDeleteItem(null);
+        fetchCurriculum();
+      } else {
+        setCurriculumMsg({ type: 'error', text: data.message || 'Gagal menghapus item.' });
+      }
+    } catch (err: unknown) {
+      setCurriculumMsg({ type: 'error', text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setIsSavingCurriculum(false);
     }
   };
 
@@ -435,6 +656,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     const approved = questions.filter((q) => q.status === 'approved').length;
     const activePlayers = players.filter((p) => !p.is_suspended).length;
     const suspendedPlayers = players.filter((p) => p.is_suspended).length;
+    const totalCurriculumTopics = curriculumTopics.length;
+    const totalCurriculumLevels = curriculumTopics.reduce((acc, t) => acc + (t.levels?.length || 0), 0);
     return {
       total: totalQuestions || questions.length,
       active,
@@ -443,8 +666,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
       playersCount: players.length,
       activePlayers,
       suspendedPlayers,
+      totalCurriculumTopics,
+      totalCurriculumLevels,
     };
-  }, [questions, totalQuestions, players]);
+  }, [questions, totalQuestions, players, curriculumTopics]);
+
+  // Filtered Topics dengan Search & Filter
+  const filteredCurriculumTopics = useMemo(() => {
+    return curriculumTopics.filter((t) => {
+      if (curriculumGradeFilter !== 'all' && t.education_level !== curriculumGradeFilter) return false;
+      if (curriculumSemesterFilter !== 'all' && String(t.semester) !== curriculumSemesterFilter) return false;
+      if (curriculumSearch.trim()) {
+        const q = curriculumSearch.toLowerCase();
+        const matchTopic = t.name.toLowerCase().includes(q) || t.slug.toLowerCase().includes(q);
+        const matchLevel = t.levels?.some((lvl) => lvl.name.toLowerCase().includes(q));
+        if (!matchTopic && !matchLevel) return false;
+      }
+      return true;
+    });
+  }, [curriculumTopics, curriculumGradeFilter, curriculumSemesterFilter, curriculumSearch]);
 
   // Filtered Players dengan Search & Status
   const filteredPlayers = useMemo(() => {
@@ -854,7 +1094,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
             Kurikulum & Soal
           </div>
 
-          {/* Menu 3: Bank Soal */}
+          {/* Menu 3: Jalur & Kurikulum */}
+          <button
+            onClick={() => setActiveTab('curriculum')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '10px 14px',
+              borderRadius: '8px',
+              backgroundColor: activeTab === 'curriculum' ? '#EFF6FF' : 'transparent',
+              color: activeTab === 'curriculum' ? '#1D4ED8' : '#475569',
+              border: 'none',
+              borderLeft: activeTab === 'curriculum' ? '4px solid #2563EB' : '4px solid transparent',
+              fontWeight: activeTab === 'curriculum' ? 800 : 600,
+              fontSize: '0.875rem',
+              cursor: 'pointer',
+              textAlign: 'left',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '1.2rem' }}>🗺️</span>
+              <span>Jalur & Kurikulum</span>
+            </div>
+            <span
+              style={{
+                fontSize: '0.6875rem',
+                padding: '2px 8px',
+                borderRadius: '999px',
+                backgroundColor: activeTab === 'curriculum' ? '#DBEAFE' : '#F1F5F9',
+                color: activeTab === 'curriculum' ? '#1E40AF' : '#64748B',
+                fontWeight: 700,
+              }}
+            >
+              {stats.totalCurriculumTopics} Topik
+            </span>
+          </button>
+
+          {/* Menu 4: Bank Soal */}
           <button
             onClick={() => setActiveTab('questions')}
             style={{
@@ -1216,7 +1494,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
               <span>/</span>
               <span style={{ color: '#2563EB', fontWeight: 700 }}>
                 {activeTab === 'overview' && 'Ringkasan & Analitik'}
-                {activeTab === 'questions' && 'Bank Soal & Kurikulum'}
+                {activeTab === 'curriculum' && 'Jalur & Kurikulum'}
+                {activeTab === 'questions' && 'Bank Soal Matematika'}
                 {activeTab === 'import' && 'Impor JSON Soal (v1.0)'}
                 {activeTab === 'players' && 'Data Murid & Bantuan PIN'}
                 {activeTab === 'leaderboard' && 'Papan Peringkat (Leaderboard)'}
@@ -1225,7 +1504,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
             </div>
             <h1 style={{ fontSize: '1.25rem', fontWeight: 900, color: '#1E293B', marginTop: '2px' }}>
               {activeTab === 'overview' && 'Ringkasan Platform & Kurikulum KidsGo!'}
-              {activeTab === 'questions' && 'Manajemen Bank Soal & Kurikulum'}
+              {activeTab === 'curriculum' && 'Jalur Petualangan & Manajemen Kurikulum'}
+              {activeTab === 'questions' && 'Manajemen Bank Soal Matematika'}
               {activeTab === 'import' && 'Impor Berkas Bank Soal JSON (v1.0)'}
               {activeTab === 'players' && 'Pengelolaan Akun Murid & Bantuan PIN'}
               {activeTab === 'leaderboard' && 'Papan Peringkat Belajar (Leaderboard)'}
@@ -1239,6 +1519,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                 fetchQuestions();
                 fetchPlayers();
                 fetchLeaderboard();
+                fetchCurriculum();
               }}
               style={{
                 display: 'inline-flex',
@@ -1411,6 +1692,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                     {stats.activePlayers} Aktif • {stats.suspendedPlayers} Ditangguhkan →
                   </div>
                 </div>
+
+                {/* Card Jalur & Kurikulum */}
+                <div
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    padding: '20px',
+                    borderRadius: '12px',
+                    border: '1px solid #E2E8F0',
+                    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => setActiveTab('curriculum')}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.8125rem', color: '#64748B', fontWeight: 700 }}>Jalur & Kurikulum</span>
+                    <span style={{ fontSize: '1.25rem' }}>🗺️</span>
+                  </div>
+                  <div style={{ fontSize: '2rem', fontWeight: 900, color: '#7C3AED', marginTop: '6px' }}>
+                    {stats.totalCurriculumTopics} Topik
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#7C3AED', marginTop: '4px', fontWeight: 600 }}>
+                    {stats.totalCurriculumLevels} Level Petualangan →
+                  </div>
+                </div>
               </div>
 
               {/* Grid Distribusi Soal per Jenjang Pendidikan */}
@@ -1567,6 +1872,959 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ========================================================
+              TAB: JALUR PETUALANGAN & KURIKULUM (TOPIK & LEVEL)
+              ======================================================== */}
+          {activeTab === 'curriculum' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* 1. Header Toolbar */}
+              <div
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  padding: '20px 24px',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '16px',
+                }}
+              >
+                <div>
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1E293B', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    Jalur Petualangan & Kurikulum
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', backgroundColor: '#EDE9FE', color: '#6D28D9' }}>
+                      {curriculumTopics.length} Topik
+                    </span>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', backgroundColor: '#DBEAFE', color: '#1D4ED8' }}>
+                      {curriculumTopics.reduce((acc, t) => acc + (t.levels?.length || 0), 0)} Level
+                    </span>
+                  </h3>
+                  <p style={{ fontSize: '0.8125rem', color: '#64748B', marginTop: '4px' }}>
+                    Kelola topik pembelajaran, nomor urut semester, dan level petualangan anak. Soal pada Bank Soal dapat dihubungkan ke level ini.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => {
+                    setEditingTopic(null);
+                    setTopicForm({
+                      name: '',
+                      education_level: curriculumGradeFilter !== 'all' ? curriculumGradeFilter : 'SD_1',
+                      semester: curriculumSemesterFilter !== 'all' ? (Number(curriculumSemesterFilter) as 1 | 2) : 1,
+                      order_index: curriculumTopics.length + 1,
+                    });
+                    setIsTopicModalOpen(true);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 18px',
+                    backgroundColor: '#2563EB',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 700,
+                    fontSize: '0.875rem',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)',
+                  }}
+                >
+                  <span>+</span> Tambah Topik Baru
+                </button>
+              </div>
+
+              {/* Notifikasi Pesan */}
+              {curriculumMsg && (
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    borderRadius: '8px',
+                    backgroundColor: curriculumMsg.type === 'success' ? '#DCFCE7' : '#FEE2E2',
+                    color: curriculumMsg.type === 'success' ? '#15803D' : '#991B1B',
+                    fontWeight: 700,
+                    fontSize: '0.875rem',
+                  }}
+                >
+                  {curriculumMsg.text}
+                </div>
+              )}
+
+              {/* Filter & Pencarian Toolbar */}
+              <div
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  padding: '16px 20px',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div style={{ flex: 1, minWidth: '220px', position: 'relative' }}>
+                  <input
+                    type="text"
+                    value={curriculumSearch}
+                    onChange={(e) => setCurriculumSearch(e.target.value)}
+                    placeholder="🔍 Cari nama topik atau level petualangan..."
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '0.875rem',
+                      outline: 'none',
+                    }}
+                  />
+                  {curriculumSearch && (
+                    <button
+                      onClick={() => setCurriculumSearch('')}
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#94A3B8',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#475569' }}>Jenjang:</label>
+                  <select
+                    value={curriculumGradeFilter}
+                    onChange={(e) => setCurriculumGradeFilter(e.target.value)}
+                    style={{
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '0.875rem',
+                      backgroundColor: '#FFFFFF',
+                      fontWeight: 600,
+                      color: '#1E293B',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="all">Semua Jenjang</option>
+                    {EDUCATION_LEVELS.map((lvl) => (
+                      <option key={lvl.code} value={lvl.code}>
+                        {lvl.name} ({lvl.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#475569' }}>Semester:</label>
+                  <select
+                    value={curriculumSemesterFilter}
+                    onChange={(e) => setCurriculumSemesterFilter(e.target.value)}
+                    style={{
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '0.875rem',
+                      backgroundColor: '#FFFFFF',
+                      fontWeight: 600,
+                      color: '#1E293B',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="all">Semua Semester</option>
+                    <option value="1">Semester 1</option>
+                    <option value="2">Semester 2</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Daftar Topik & Level */}
+              {isLoadingCurriculum ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '8px' }}>⏳</div>
+                  <div>Memuat kurikulum dan jalur level...</div>
+                </div>
+              ) : filteredCurriculumTopics.length === 0 ? (
+                <div
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    padding: '50px 20px',
+                    borderRadius: '12px',
+                    border: '1px solid #E2E8F0',
+                    textAlign: 'center',
+                    color: '#64748B',
+                  }}
+                >
+                  <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>🗺️</div>
+                  <div style={{ fontWeight: 800, fontSize: '1.125rem', color: '#1E293B' }}>Tidak ada topik yang ditemukan</div>
+                  <div style={{ fontSize: '0.875rem', marginTop: '6px', maxWidth: '420px', margin: '6px auto 16px' }}>
+                    Belum ada topik yang sesuai dengan filter atau kata kunci pencarian.
+                  </div>
+                  <button
+                    onClick={() => {
+                      setEditingTopic(null);
+                      setTopicForm({
+                        name: '',
+                        education_level: 'SD_1',
+                        semester: 1,
+                        order_index: 1,
+                      });
+                      setIsTopicModalOpen(true);
+                    }}
+                    style={{
+                      padding: '10px 20px',
+                      backgroundColor: '#2563EB',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    + Buat Topik Pertama
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {filteredCurriculumTopics.map((topic) => (
+                    <div
+                      key={topic.id}
+                      style={{
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: '12px',
+                        border: '1px solid #E2E8F0',
+                        overflow: 'hidden',
+                        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                      }}
+                    >
+                      {/* Topik Header */}
+                      <div
+                        style={{
+                          padding: '18px 22px',
+                          borderBottom: '1px solid #F1F5F9',
+                          backgroundColor: '#F8FAFC',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: '12px',
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                            <span
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                backgroundColor: '#EFF6FF',
+                                color: '#1D4ED8',
+                                fontSize: '0.75rem',
+                                fontWeight: 800,
+                              }}
+                            >
+                              {topic.education_level.replace('_', ' ')}
+                            </span>
+                            <span
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                backgroundColor: '#F1F5F9',
+                                color: '#475569',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                              }}
+                            >
+                              Semester {topic.semester}
+                            </span>
+                            <span
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                backgroundColor: '#FEF3C7',
+                                color: '#B45309',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                              }}
+                            >
+                              Urutan #{topic.order_index}
+                            </span>
+                            <span
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                backgroundColor: '#DCFCE7',
+                                color: '#15803D',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                              }}
+                            >
+                              {topic.levels?.length || 0} Level Petualangan
+                            </span>
+                          </div>
+                          <h4 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#0F172A', margin: 0 }}>
+                            {topic.name}
+                          </h4>
+                          <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: '2px', fontFamily: 'monospace' }}>
+                            ID: {topic.id}
+                          </div>
+                        </div>
+
+                        {/* Aksi Topik */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <button
+                            onClick={() => {
+                              setParentTopicForLevel(topic);
+                              setEditingLevel(null);
+                              setLevelForm({
+                                name: '',
+                                level_number: (topic.levels?.length || 0) + 1,
+                                required_xp: 50,
+                                passing_score: 100,
+                              });
+                              setIsLevelModalOpen(true);
+                            }}
+                            style={{
+                              padding: '8px 14px',
+                              backgroundColor: '#ECFDF5',
+                              border: '1px solid #A7F3D0',
+                              color: '#065F46',
+                              borderRadius: '6px',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <span>+</span> Tambah Level
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingTopic(topic);
+                              setTopicForm({
+                                name: topic.name,
+                                education_level: topic.education_level,
+                                semester: topic.semester as 1 | 2,
+                                order_index: topic.order_index,
+                              });
+                              setIsTopicModalOpen(true);
+                            }}
+                            style={{
+                              padding: '8px 12px',
+                              backgroundColor: '#F8FAFC',
+                              border: '1px solid #CBD5E1',
+                              color: '#334155',
+                              borderRadius: '6px',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Edit ✏️
+                          </button>
+                          <button
+                            onClick={() => {
+                              setCurriculumDeleteItem({
+                                type: 'topic',
+                                id: topic.id,
+                                name: topic.name,
+                              });
+                            }}
+                            style={{
+                              padding: '8px 12px',
+                              backgroundColor: '#FEF2F2',
+                              border: '1px solid #FECACA',
+                              color: '#DC2626',
+                              borderRadius: '6px',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Hapus 🗑️
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Tabel Level di Dalam Topik */}
+                      <div style={{ padding: '16px 20px' }}>
+                        {!topic.levels || topic.levels.length === 0 ? (
+                          <div style={{ padding: '20px', textAlign: 'center', color: '#94A3B8', fontSize: '0.875rem' }}>
+                            Belum ada level pada topik ini. Klik <strong>"+ Tambah Level"</strong> untuk membuat level pertama.
+                          </div>
+                        ) : (
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
+                            <thead>
+                              <tr style={{ color: '#64748B', borderBottom: '1px solid #E2E8F0', textAlign: 'left' }}>
+                                <th style={{ padding: '8px 12px', fontWeight: 700, width: '80px' }}>LEVEL KE-</th>
+                                <th style={{ padding: '8px 12px', fontWeight: 700 }}>NAMA LEVEL</th>
+                                <th style={{ padding: '8px 12px', fontWeight: 700 }}>TARGET XP</th>
+                                <th style={{ padding: '8px 12px', fontWeight: 700 }}>SOAL DI BANK</th>
+                                <th style={{ padding: '8px 12px', fontWeight: 700, textAlign: 'right' }}>AKSI</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {topic.levels.map((lvl) => (
+                                <tr key={lvl.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                                  <td style={{ padding: '10px 12px' }}>
+                                    <span
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        width: '28px',
+                                        height: '28px',
+                                        borderRadius: '50%',
+                                        backgroundColor: '#EFF6FF',
+                                        color: '#1D4ED8',
+                                        fontWeight: 800,
+                                        fontSize: '0.75rem',
+                                      }}
+                                    >
+                                      {lvl.level_number}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '10px 12px', fontWeight: 700, color: '#1E293B' }}>
+                                    {lvl.name}
+                                  </td>
+                                  <td style={{ padding: '10px 12px', fontWeight: 700, color: '#D97706' }}>
+                                    ⭐ {lvl.required_xp} XP
+                                  </td>
+                                  <td style={{ padding: '10px 12px' }}>
+                                    <span
+                                      style={{
+                                        padding: '2px 8px',
+                                        borderRadius: '999px',
+                                        fontSize: '0.6875rem',
+                                        fontWeight: 700,
+                                        backgroundColor: lvl.total_questions > 0 ? '#DCFCE7' : '#FEF3C7',
+                                        color: lvl.total_questions > 0 ? '#15803D' : '#B45309',
+                                      }}
+                                    >
+                                      📝 {lvl.total_questions} Soal
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
+                                      <button
+                                        onClick={() => {
+                                          setParentTopicForLevel(topic);
+                                          setEditingLevel(lvl);
+                                          setLevelForm({
+                                            name: lvl.name,
+                                            level_number: lvl.level_number,
+                                            required_xp: lvl.required_xp,
+                                            passing_score: lvl.passing_score,
+                                          });
+                                          setIsLevelModalOpen(true);
+                                        }}
+                                        style={{
+                                          padding: '4px 8px',
+                                          backgroundColor: '#F8FAFC',
+                                          border: '1px solid #CBD5E1',
+                                          borderRadius: '4px',
+                                          fontSize: '0.6875rem',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        Edit ✏️
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setCurriculumDeleteItem({
+                                            type: 'level',
+                                            id: lvl.id,
+                                            name: lvl.name,
+                                            topicId: topic.id,
+                                          });
+                                        }}
+                                        style={{
+                                          padding: '4px 8px',
+                                          backgroundColor: '#FEF2F2',
+                                          border: '1px solid #FECACA',
+                                          color: '#DC2626',
+                                          borderRadius: '4px',
+                                          fontSize: '0.6875rem',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        Hapus 🗑️
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Modal Dialog Tambah / Edit Topik */}
+              {isTopicModalOpen && (
+                <div
+                  style={{
+                    position: 'fixed',
+                    inset: 0,
+                    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 100000,
+                    padding: '20px',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '100%',
+                      maxWidth: '460px',
+                      padding: '24px',
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: '16px',
+                      boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '16px',
+                    }}
+                  >
+                    <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1E293B', margin: 0 }}>
+                      {editingTopic ? 'Edit Topik Kurikulum' : 'Tambah Topik Kurikulum Baru'}
+                    </h3>
+
+                    <form onSubmit={handleSaveTopic} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                      <div>
+                        <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                          Nama Topik Pembelajaran:
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Contoh: Operasi Hitung Perkalian Dasar"
+                          value={topicForm.name}
+                          onChange={(e) => setTopicForm({ ...topicForm, name: e.target.value })}
+                          autoFocus
+                          style={{
+                            width: '100%',
+                            padding: '10px 14px',
+                            fontSize: '0.875rem',
+                            borderRadius: '8px',
+                            border: '1.5px solid #CBD5E1',
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        <div>
+                          <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                            Jenjang Kelas:
+                          </label>
+                          <select
+                            value={topicForm.education_level}
+                            onChange={(e) => setTopicForm({ ...topicForm, education_level: e.target.value })}
+                            style={{
+                              width: '100%',
+                              padding: '10px 12px',
+                              fontSize: '0.875rem',
+                              borderRadius: '8px',
+                              border: '1.5px solid #CBD5E1',
+                              backgroundColor: '#FFFFFF',
+                            }}
+                          >
+                            {EDUCATION_LEVELS.map((lvl) => (
+                              <option key={lvl.code} value={lvl.code}>
+                                {lvl.name} ({lvl.code})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                            Semester:
+                          </label>
+                          <select
+                            value={topicForm.semester}
+                            onChange={(e) => setTopicForm({ ...topicForm, semester: Number(e.target.value) as 1 | 2 })}
+                            style={{
+                              width: '100%',
+                              padding: '10px 12px',
+                              fontSize: '0.875rem',
+                              borderRadius: '8px',
+                              border: '1.5px solid #CBD5E1',
+                              backgroundColor: '#FFFFFF',
+                            }}
+                          >
+                            <option value={1}>Semester 1</option>
+                            <option value={2}>Semester 2</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                          Nomor Urutan Topik:
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          required
+                          value={topicForm.order_index}
+                          onChange={(e) => setTopicForm({ ...topicForm, order_index: Number(e.target.value) })}
+                          style={{
+                            width: '100%',
+                            padding: '10px 14px',
+                            fontSize: '0.875rem',
+                            borderRadius: '8px',
+                            border: '1.5px solid #CBD5E1',
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsTopicModalOpen(false);
+                            setEditingTopic(null);
+                          }}
+                          disabled={isSavingCurriculum}
+                          style={{
+                            flex: 1,
+                            padding: '10px',
+                            backgroundColor: '#F1F5F9',
+                            border: '1px solid #CBD5E1',
+                            borderRadius: '8px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            color: '#475569',
+                          }}
+                        >
+                          Batal
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isSavingCurriculum || !topicForm.name.trim()}
+                          style={{
+                            flex: 1.2,
+                            padding: '10px',
+                            backgroundColor: '#2563EB',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {isSavingCurriculum ? 'Menyimpan...' : 'Simpan Topik'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* Modal Dialog Tambah / Edit Level */}
+              {isLevelModalOpen && (
+                <div
+                  style={{
+                    position: 'fixed',
+                    inset: 0,
+                    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 100000,
+                    padding: '20px',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '100%',
+                      maxWidth: '460px',
+                      padding: '24px',
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: '16px',
+                      boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '16px',
+                    }}
+                  >
+                    <div>
+                      <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1E293B', margin: 0 }}>
+                        {editingLevel ? 'Edit Level Petualangan' : 'Tambah Level Petualangan Baru'}
+                      </h3>
+                      {parentTopicForLevel && (
+                        <p style={{ fontSize: '0.8125rem', color: '#64748B', margin: '4px 0 0' }}>
+                          Topik: <strong>{parentTopicForLevel.name}</strong> ({parentTopicForLevel.education_level.replace('_', ' ')} - Sem {parentTopicForLevel.semester})
+                        </p>
+                      )}
+                    </div>
+
+                    <form onSubmit={handleSaveLevel} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '12px' }}>
+                        <div>
+                          <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                            Level Ke:
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            required
+                            value={levelForm.level_number}
+                            onChange={(e) => setLevelForm({ ...levelForm, level_number: Number(e.target.value) })}
+                            style={{
+                              width: '100%',
+                              padding: '10px 14px',
+                              fontSize: '0.875rem',
+                              borderRadius: '8px',
+                              border: '1.5px solid #CBD5E1',
+                              textAlign: 'center',
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                            Nama Level Petualangan:
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Contoh: Mengalikan Bilangan 1-5"
+                            value={levelForm.name}
+                            onChange={(e) => setLevelForm({ ...levelForm, name: e.target.value })}
+                            autoFocus
+                            style={{
+                              width: '100%',
+                              padding: '10px 14px',
+                              fontSize: '0.875rem',
+                              borderRadius: '8px',
+                              border: '1.5px solid #CBD5E1',
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        <div>
+                          <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                            Target XP Kelulusan:
+                          </label>
+                          <input
+                            type="number"
+                            min={10}
+                            max={500}
+                            required
+                            value={levelForm.required_xp}
+                            onChange={(e) => setLevelForm({ ...levelForm, required_xp: Number(e.target.value) })}
+                            style={{
+                              width: '100%',
+                              padding: '10px 14px',
+                              fontSize: '0.875rem',
+                              borderRadius: '8px',
+                              border: '1.5px solid #CBD5E1',
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
+                            Passing Score (%):
+                          </label>
+                          <input
+                            type="number"
+                            min={50}
+                            max={100}
+                            required
+                            value={levelForm.passing_score}
+                            onChange={(e) => setLevelForm({ ...levelForm, passing_score: Number(e.target.value) })}
+                            style={{
+                              width: '100%',
+                              padding: '10px 14px',
+                              fontSize: '0.875rem',
+                              borderRadius: '8px',
+                              border: '1.5px solid #CBD5E1',
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsLevelModalOpen(false);
+                            setEditingLevel(null);
+                          }}
+                          disabled={isSavingCurriculum}
+                          style={{
+                            flex: 1,
+                            padding: '10px',
+                            backgroundColor: '#F1F5F9',
+                            border: '1px solid #CBD5E1',
+                            borderRadius: '8px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            color: '#475569',
+                          }}
+                        >
+                          Batal
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isSavingCurriculum || !levelForm.name.trim()}
+                          style={{
+                            flex: 1.2,
+                            padding: '10px',
+                            backgroundColor: '#16A34A',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {isSavingCurriculum ? 'Menyimpan...' : 'Simpan Level'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* Modal Konfirmasi Hapus (Topik / Level) */}
+              {curriculumDeleteItem && (
+                <div
+                  style={{
+                    position: 'fixed',
+                    inset: 0,
+                    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 100000,
+                    padding: '20px',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '100%',
+                      maxWidth: '440px',
+                      padding: '24px',
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: '16px',
+                      boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '16px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div
+                        style={{
+                          width: '44px',
+                          height: '44px',
+                          borderRadius: '12px',
+                          backgroundColor: '#FEE2E2',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '1.5rem',
+                          flexShrink: 0,
+                        }}
+                      >
+                        🗑️
+                      </div>
+                      <div>
+                        <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1E293B', margin: 0 }}>
+                          Hapus {curriculumDeleteItem.type === 'topic' ? 'Topik' : 'Level'}?
+                        </h3>
+                        <p style={{ fontSize: '0.8125rem', color: '#64748B', margin: '2px 0 0' }}>
+                          <strong>{curriculumDeleteItem.name}</strong>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        padding: '12px 14px',
+                        backgroundColor: '#FEF2F2',
+                        borderRadius: '8px',
+                        border: '1px solid #FECACA',
+                        fontSize: '0.8125rem',
+                        color: '#991B1B',
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {curriculumDeleteItem.type === 'topic' ? (
+                        <>
+                          Peringatan: Menghapus topik ini juga akan menghapus <strong>seluruh level di bawahnya</strong>. Soal-soal yang ada di Bank Soal akan tetap aman namun keterkaitan topik dan levelnya akan diatur ulang menjadi kosong.
+                        </>
+                      ) : (
+                        <>
+                          Peringatan: Level ini akan dihapus dari peta jalur petualangan. Soal yang terhubung dengan level ini akan dilepaskan (level_id diset null).
+                        </>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setCurriculumDeleteItem(null)}
+                        disabled={isSavingCurriculum}
+                        style={{
+                          flex: 1,
+                          padding: '10px',
+                          backgroundColor: '#F1F5F9',
+                          border: '1px solid #CBD5E1',
+                          borderRadius: '8px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          color: '#475569',
+                        }}
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDeleteCurriculumItem}
+                        disabled={isSavingCurriculum}
+                        style={{
+                          flex: 1.2,
+                          padding: '10px',
+                          backgroundColor: '#DC2626',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {isSavingCurriculum ? 'Menghapus...' : 'Ya, Hapus'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
