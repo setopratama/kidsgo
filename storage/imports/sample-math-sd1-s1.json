@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "subject": "mathematics",
+  "education_level": "SD_1",
+  "semester": 1,
+  "topic": "addition",
+  "difficulty": 2,
+  "questions": [
+    {
+      "question_id": "MATH-SD1-S1-0001",
+      "type": "multiple_choice",
+      "question": "Berapakah hasil 5 + 3?",
+      "visual": "🍎🍎🍎🍎🍎 + 🍎🍎🍎",
+      "options": [
+        { "id": "A", "text": "6" },
+        { "id": "B", "text": "7" },
+        { "id": "C", "text": "8" },
+        { "id": "D", "text": "9" }
+      ],
+      "correct_answer": "C",
+      "explanation": "Lima buah apel ditambah tiga apel sama dengan delapan apel.",
+      "tags": ["addition", "basic-math"]
+    },
+    {
+      "question_id": "MATH-SD1-S1-0002",
+      "type": "multiple_choice",
+      "question": "Ada 4 kelinci sedang bermain di kebun, lalu datang 2 kelinci lagi. Berapa jumlah kelinci sekarang?",
+      "visual": "🐇🐇🐇🐇 + 🐇🐇",
+      "options": [
+        { "id": "A", "text": "5" },
+        { "id": "B", "text": "6" },
+        { "id": "C", "text": "7" },
+        { "id": "D", "text": "8" }
+      ],
+      "correct_answer": "B",
+      "explanation": "Empat kelinci ditambah dua kelinci sama dengan enam kelinci.",
+      "tags": ["addition", "word-problem"]
+    },
+    {
+      "question_id": "MATH-SD1-S1-0003",
+      "type": "multiple_choice",
+      "question": "Berapakah hasil 7 + 2?",
+      "visual": "⭐ ⭐ ⭐ ⭐ ⭐ ⭐ ⭐ + ⭐ ⭐",
+      "options": [
+        { "id": "A", "text": "8" },
+        { "id": "B", "text": "9" },
+        { "id": "C", "text": "10" },
+        { "id": "D", "text": "7" }
+      ],
+      "correct_answer": "B",
+      "explanation": "Tujuh bintang ditambah dua bintang sama dengan sembilan bintang.",
+      "tags": ["addition", "counting"]
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "subject": "mathematics",
+  "education_level": "SD_1",
+  "semester": 1,
+  "topic": "Penjumlahan dan Pengurangan Dasar",
+  "difficulty": 1,
+  "questions": [
+    {
+      "question_id": "MATH-SD1-S1-001",
+      "type": "multiple_choice",
+      "question": "Berapakah hasil dari 5 + 3?",
+      "visual": "🍎🍎🍎🍎🍎  +  🍎🍎🍎",
+      "options": [
+        { "id": "A", "text": "6" },
+        { "id": "B", "text": "7" },
+        { "id": "C", "text": "8" },
+        { "id": "D", "text": "9" }
+      ],
+      "correct_answer": "C",
+      "explanation": "Lima buah apel ditambah tiga buah apel sama dengan delapan (8) apel.",
+      "tags": ["addition", "sd-1"]
+    },
+    {
+      "question_id": "MATH-SD1-S1-002",
+      "type": "multiple_choice",
+      "question": "Ada 4 kelinci, lalu datang lagi 2 kelinci. Ada berapa kelinci sekarang?",
+      "visual": "🐇🐇🐇🐇  +  🐇🐇",
+      "options": [
+        { "id": "A", "text": "5" },
+        { "id": "B", "text": "6" },
+        { "id": "C", "text": "7" },
+        { "id": "D", "text": "8" }
+      ],
+      "correct_answer": "B",
+      "explanation": "Empat kelinci ditambah dua kelinci menjadi 6 kelinci.",
+      "tags": ["addition", "word-problem"]
+    },
+    {
+      "question_id": "MATH-SD1-S1-003",
+      "type": "multiple_choice",
+      "question": "Berapakah hasil dari 7 + 2?",
+      "visual": "⭐ ⭐ ⭐ ⭐ ⭐ ⭐ ⭐  +  ⭐ ⭐",
+      "options": [
+        { "id": "A", "text": "8" },
+        { "id": "B", "text": "9" },
+        { "id": "C", "text": "10" },
+        { "id": "D", "text": "7" }
+      ],
+      "correct_answer": "B",
+      "explanation": "Tujuh ditambah dua langkah ke depan sama dengan sembilan (9).",
+      "tags": ["addition", "sd-1"]
+    }
+  ]
+}

@@ -1,0 +1,319 @@
+/* ========================================================
+   KidsGo! Design System
+   Pedoman: DESIGN.md (Playful Industrial Minimalism · Warm White)
+   ======================================================== */
+
+:root {
+  /* 1. Token Warna (Section 3) */
+  --color-ink: #20242C;
+  --color-paper: #FFFFFF;
+  --color-canvas: #F7F8FA;
+  --color-surface-soft: #F1F4F7;
+  --color-border: #E3E7EC;
+  --color-muted: #657080;
+  --color-muted-soft: #8792A0;
+
+  --color-primary: #2563EB;
+  --color-primary-soft: #EAF1FF;
+  --color-primary-hover: #1D4ED8;
+
+  --color-sky: #38BDF8;
+  --color-sky-soft: #E0F2FE;
+  
+  --color-mint: #34BFA3;
+  --color-mint-soft: #E6F7F2;
+
+  --color-sunshine: #F5C451;
+  --color-sunshine-soft: #FEF9E7;
+
+  --color-coral: #F28B72;
+  --color-coral-soft: #FDEEEA;
+
+  --color-success: #16845B;
+  --color-success-soft: #EAF7F0;
+  
+  --color-warning: #A96008;
+  --color-warning-soft: #FEF3E2;
+
+  --color-danger: #C83F49;
+  --color-danger-soft: #FDF0F0;
+
+  /* 2. Tipografi (Section 4) */
+  --font-family: 'Plus Jakarta Sans', 'Nunito Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-numeric: 'Plus Jakarta Sans', tabular-nums, sans-serif;
+
+  /* 3. Geometri & Radius (Section 5) */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-input: 10px;
+  --radius-btn: 12px;
+  --radius-card: 16px;
+  --radius-panel: 18px;
+  --radius-full: 9999px;
+
+  /* 4. Target Sentuh Ramah Jemari Anak */
+  --touch-min: 48px;
+  --touch-large: 56px;
+
+  /* 5. Bayangan Halus (Bukan 3D berat) */
+  --shadow-subtle: 0 1px 3px rgba(32, 36, 44, 0.05);
+  --shadow-card: 0 2px 8px rgba(32, 36, 44, 0.06);
+  --shadow-float: 0 8px 24px rgba(32, 36, 44, 0.12);
+
+  /* 6. Spacing Basis 4px */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: #E9ECEF; /* Kanvas luar desktop */
+  color: var(--color-ink);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  overflow-x: hidden;
+}
+
+/* Frame Mobile-First Terpusat di Desktop */
+#root {
+  width: 100%;
+  max-width: 440px; /* Rasio ideal smartphone modern */
+  min-height: 100vh;
+  background-color: var(--color-canvas);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  box-shadow: 0 0 50px rgba(0, 0, 0, 0.09);
+  border-left: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+}
+
+@media (max-width: 480px) {
+  body {
+    background-color: var(--color-canvas);
+  }
+  #root {
+    max-width: 100%;
+    box-shadow: none;
+    border-left: none;
+    border-right: none;
+  }
+}
+
+/* Scrollbar rapi */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+/* ========================================================
+   Komponen Dasar (DESIGN.md Section 8)
+   ======================================================== */
+
+/* Tombol */
+button {
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  border-radius: var(--radius-btn);
+  border: 1px solid transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  transition: all 0.16s ease-in-out;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Tombol Utama (Primary) */
+.btn-primary {
+  background-color: var(--color-primary);
+  color: var(--color-paper);
+  min-height: var(--touch-min);
+  padding: 12px 24px;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+}
+
+.btn-primary:hover {
+  background-color: var(--color-primary-hover);
+}
+
+.btn-primary:active {
+  transform: translateY(1px);
+}
+
+.btn-primary-large {
+  min-height: var(--touch-large);
+  font-size: 1.125rem;
+  padding: 14px 28px;
+  width: 100%;
+}
+
+/* Tombol Sekunder */
+.btn-secondary {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  border: 1px solid var(--color-border);
+  min-height: var(--touch-min);
+  padding: 12px 20px;
+}
+
+.btn-secondary:hover {
+  background-color: var(--color-surface-soft);
+  border-color: #D1D7E0;
+}
+
+/* Tombol Soft / Ghost */
+.btn-soft {
+  background-color: var(--color-surface-soft);
+  color: var(--color-ink);
+  min-height: 40px;
+  padding: 8px 16px;
+  font-size: 0.875rem;
+}
+
+.btn-soft:hover {
+  background-color: #E5E9EE;
+}
+
+/* Kartu */
+.card {
+  background-color: var(--color-paper);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-subtle);
+  transition: border-color 0.16s ease, transform 0.16s ease;
+}
+
+.card:hover {
+  border-color: #D6DCE5;
+}
+
+/* Badges & Chips */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+
+.badge-mint {
+  background-color: var(--color-mint-soft);
+  color: var(--color-success);
+}
+
+.badge-primary {
+  background-color: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.badge-sunshine {
+  background-color: var(--color-sunshine-soft);
+  color: var(--color-warning);
+}
+
+.badge-coral {
+  background-color: var(--color-coral-soft);
+  color: #C04D31;
+}
+
+/* Progress Bar */
+.progress-track {
+  width: 100%;
+  height: 10px;
+  background-color: var(--color-surface-soft);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: var(--radius-full);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.progress-fill-mint {
+  background: var(--color-mint);
+}
+
+/* Tab & Bottom Navigation */
+.bottom-nav {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: var(--color-paper);
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 8px 6px;
+  z-index: 100;
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 2px;
+  border-radius: var(--radius-btn);
+  background: transparent;
+  border: none;
+  color: var(--color-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  min-height: 48px;
+}
+
+.nav-item.active {
+  color: var(--color-primary);
+  background-color: var(--color-primary-soft);
+}
+
+.nav-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+/* Motion Preferences */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
