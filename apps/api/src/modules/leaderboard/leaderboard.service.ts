@@ -42,7 +42,7 @@ export class LeaderboardService {
                COALESCE(SUM(xl.amount), p.current_xp, 0) as total_xp
         FROM players p
         LEFT JOIN xp_ledger xl ON p.id = xl.player_id
-        WHERE p.id != 'ply-guest-demo' ${gradeFilter}
+        WHERE p.id != 'ply-guest-demo' AND (p.is_suspended IS NULL OR p.is_suspended = 0) ${gradeFilter}
         GROUP BY p.id
         ORDER BY total_xp DESC, p.created_at ASC
         LIMIT ?
@@ -54,7 +54,7 @@ export class LeaderboardService {
                COALESCE(SUM(xl.amount), 0) as total_xp
         FROM players p
         JOIN xp_ledger xl ON p.id = xl.player_id
-        WHERE p.id != 'ply-guest-demo' ${dateFilter} ${gradeFilter}
+        WHERE p.id != 'ply-guest-demo' AND (p.is_suspended IS NULL OR p.is_suspended = 0) ${dateFilter} ${gradeFilter}
         GROUP BY p.id
         ORDER BY total_xp DESC
         LIMIT ?

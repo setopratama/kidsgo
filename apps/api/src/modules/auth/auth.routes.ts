@@ -306,7 +306,53 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ success: true, players });
   });
 
-  // 10. Logout Admin
+  // 10. Suspend / Unsuspend Akun Anak oleh Admin
+  app.post<{
+    Params: { id: string };
+    Body: { isSuspended: boolean };
+  }>(
+    '/api/admin/players/:id/suspend',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' },
+          },
+        },
+        body: {
+          type: 'object',
+          required: ['isSuspended'],
+          properties: {
+            isSuspended: { type: 'boolean' },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const token = req.cookies[ADMIN_COOKIE];
+      const admin = token ? AuthService.getAdminByToken(token) : null;
+      if (!admin) {
+        return reply.status(401).send({ success: false, message: 'Akses ditolak.' });
+      }
+
+      try {
+        await AuthService.setPlayerSuspendStatus(req.params.id, req.body.isSuspended);
+        return reply.send({
+          success: true,
+          message: req.body.isSuspended
+            ? 'Akun murid berhasil ditangguhkan (suspend).'
+            : 'Akun murid berhasil diaktifkan kembali.',
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Gagal mengubah status suspend akun murid';
+        return reply.status(400).send({ success: false, message });
+      }
+    }
+  );
+
+  // 11. Logout Admin
   app.post('/api/admin/auth/logout', async (req, reply) => {
     const token = req.cookies[ADMIN_COOKIE];
     if (token) {

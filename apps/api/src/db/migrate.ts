@@ -13,11 +13,18 @@ export function runMigrations(): void {
         pin_hash TEXT NOT NULL,
         grade TEXT NOT NULL,
         current_xp INTEGER NOT NULL DEFAULT 0,
+        is_suspended INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_players_grade ON players(grade);
     `);
+
+    // Migrasi kolom is_suspended jika tabel players sudah ada sebelumnya
+    const playerCols = db.pragma('table_info(players)') as Array<{ name: string }>;
+    if (!playerCols.some((c) => c.name === 'is_suspended')) {
+      db.exec(`ALTER TABLE players ADD COLUMN is_suspended INTEGER NOT NULL DEFAULT 0;`);
+    }
 
     // 2. Admin
     db.exec(`

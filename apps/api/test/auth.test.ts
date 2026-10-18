@@ -223,4 +223,72 @@ describe('Auth & Security (Child & Admin)', () => {
     });
     assert.strictEqual(childLoginRes.statusCode, 200);
   });
+
+  test('POST /api/admin/players/:id/suspend allows admin to suspend and unsuspend child account', async () => {
+    // 1. Dapatkan token admin
+    const adminLogin = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/login',
+      payload: { username: 'admin', pin: '889900' },
+    });
+    const setCookie = adminLogin.headers['set-cookie'];
+    const adminCookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie)!.split(';')[0];
+
+    // 2. Anak login dulu untuk mendapatkan session aktif
+    const childLoginBefore = await app.inject({
+      method: 'POST',
+      url: '/api/auth/player/login',
+      payload: { nickname: testNickname, pin: '5678' },
+    });
+    assert.strictEqual(childLoginBefore.statusCode, 200);
+    const childCookie = (Array.isArray(childLoginBefore.headers['set-cookie'])
+      ? childLoginBefore.headers['set-cookie'][0]
+      : childLoginBefore.headers['set-cookie'])!.split(';')[0];
+
+    // 3. Admin menangguhkan (suspend) akun anak
+    const suspendRes = await app.inject({
+      method: 'POST',
+      url: `/api/admin/players/${playerId}/suspend`,
+      headers: { cookie: adminCookie },
+      payload: { isSuspended: true },
+    });
+    assert.strictEqual(suspendRes.statusCode, 200);
+    const suspendBody = JSON.parse(suspendRes.payload);
+    assert.strictEqual(suspendBody.success, true);
+
+    // 4. Sesi aktif anak sebelumnya harus langsung tertolak (invalidasi sesi)
+    const checkMeRes = await app.inject({
+      method: 'GET',
+      url: '/api/auth/player/me',
+      headers: { cookie: childCookie },
+    });
+    assert.strictEqual(checkMeRes.statusCode, 401);
+
+    // 5. Anak mencoba login baru saat ditangguhkan -> Ditolak dengan pesan suspend (401)
+    const childLoginWhileSuspended = await app.inject({
+      method: 'POST',
+      url: '/api/auth/player/login',
+      payload: { nickname: testNickname, pin: '5678' },
+    });
+    assert.strictEqual(childLoginWhileSuspended.statusCode, 401);
+    const failBody = JSON.parse(childLoginWhileSuspended.payload);
+    assert.ok(failBody.message.includes('suspend') || failBody.message.includes('dinonaktifkan'));
+
+    // 6. Admin mengaktifkan kembali (unsuspend) akun anak
+    const unsuspendRes = await app.inject({
+      method: 'POST',
+      url: `/api/admin/players/${playerId}/suspend`,
+      headers: { cookie: adminCookie },
+      payload: { isSuspended: false },
+    });
+    assert.strictEqual(unsuspendRes.statusCode, 200);
+
+    // 7. Anak dapat login kembali secara normal
+    const childLoginAfterUnsuspend = await app.inject({
+      method: 'POST',
+      url: '/api/auth/player/login',
+      payload: { nickname: testNickname, pin: '5678' },
+    });
+    assert.strictEqual(childLoginAfterUnsuspend.statusCode, 200);
+  });
 });

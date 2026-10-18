@@ -9,6 +9,7 @@ export interface PlayerPublicProfile {
   avatar: string;
   grade: EducationLevel;
   current_xp: number;
+  is_suspended?: boolean;
   created_at: string;
 }
 
@@ -166,6 +167,7 @@ export class AuthService {
         avatar: params.avatar || '🦊',
         grade: params.grade,
         current_xp: 0,
+        is_suspended: false,
         created_at: now,
       },
       sessionToken,
@@ -187,10 +189,10 @@ export class AuthService {
     this.checkRateLimit(rateLimitKey);
 
     const row = db.prepare(`
-      SELECT id, nickname, avatar, pin_hash, grade, current_xp, created_at 
+      SELECT id, nickname, avatar, pin_hash, grade, current_xp, is_suspended, created_at 
       FROM players 
       WHERE LOWER(nickname) = LOWER(?)
-    `).get(nickname) as (PlayerPublicProfile & { pin_hash: string }) | undefined;
+    `).get(nickname) as (PlayerPublicProfile & { pin_hash: string; is_suspended: number }) | undefined;
 
     if (!row) {
       const lockInfo = this.recordFailedAttempt(rateLimitKey);
@@ -201,6 +203,12 @@ export class AuthService {
       }
       throw new Error(
         `Nama anak atau PIN tidak cocok. Sisa percobaan: ${lockInfo.remainingAttempts} kali sebelum akun terkunci.`
+      );
+    }
+
+    if (row.is_suspended) {
+      throw new Error(
+        '🚫 Akun anak ini sedang dinonaktifkan (suspend). Silakan hubungi guru atau administrator.'
       );
     }
 
@@ -227,6 +235,7 @@ export class AuthService {
         avatar: row.avatar,
         grade: row.grade,
         current_xp: row.current_xp,
+        is_suspended: Boolean(row.is_suspended),
         created_at: row.created_at,
       },
       sessionToken,
@@ -242,13 +251,25 @@ export class AuthService {
     const now = new Date().toISOString();
 
     const row = db.prepare(`
-      SELECT p.id, p.nickname, p.avatar, p.grade, p.current_xp, p.created_at
+      SELECT p.id, p.nickname, p.avatar, p.grade, p.current_xp, p.is_suspended, p.created_at
       FROM sessions s
       JOIN players p ON s.user_id = p.id
       WHERE s.token_hash = ? AND s.account_type = 'player' AND s.expires_at > ?
-    `).get(tokenHash, now) as PlayerPublicProfile | undefined;
+    `).get(tokenHash, now) as (PlayerPublicProfile & { is_suspended: number }) | undefined;
 
-    return row || null;
+    if (!row || row.is_suspended) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      nickname: row.nickname,
+      avatar: row.avatar,
+      grade: row.grade,
+      current_xp: row.current_xp,
+      is_suspended: Boolean(row.is_suspended),
+      created_at: row.created_at,
+    };
   }
 
   // ==========================================
@@ -440,6 +461,31 @@ export class AuthService {
   }
 
   /**
+   * Tangguhkan (suspend) atau aktifkan kembali akun anak oleh Admin
+   */
+  static async setPlayerSuspendStatus(playerId: string, isSuspended: boolean): Promise<void> {
+    const db = getDb();
+    const now = new Date().toISOString();
+
+    const result = db.prepare(`
+      UPDATE players 
+      SET is_suspended = ?, updated_at = ?
+      WHERE id = ?
+    `).run(isSuspended ? 1 : 0, now, playerId);
+
+    if (result.changes === 0) {
+      throw new Error('Akun murid tidak ditemukan.');
+    }
+
+    if (isSuspended) {
+      // Hapus seluruh sesi login aktif anak yang ditangguhkan
+      db.prepare(`
+        DELETE FROM sessions WHERE account_type = 'player' AND user_id = ?
+      `).run(playerId);
+    }
+  }
+
+  /**
    * Daftar pemain terdaftar untuk panel admin
    */
   static listPlayers(): Array<{
@@ -448,19 +494,26 @@ export class AuthService {
     avatar: string;
     grade: string;
     current_xp: number;
+    is_suspended: boolean;
     created_at: string;
   }> {
     const db = getDb();
-    return db
-      .prepare('SELECT id, nickname, avatar, grade, current_xp, created_at FROM players ORDER BY created_at DESC LIMIT 50')
+    const rows = db
+      .prepare('SELECT id, nickname, avatar, grade, current_xp, is_suspended, created_at FROM players ORDER BY created_at DESC LIMIT 100')
       .all() as Array<{
       id: string;
       nickname: string;
       avatar: string;
       grade: string;
       current_xp: number;
+      is_suspended: number;
       created_at: string;
     }>;
+
+    return rows.map((r) => ({
+      ...r,
+      is_suspended: Boolean(r.is_suspended),
+    }));
   }
 }
 

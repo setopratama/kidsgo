@@ -118,6 +118,7 @@ export interface PlayerProfile {
   avatar: string;
   grade: EducationLevel;
   current_xp: number;
+  is_suspended?: boolean;
   created_at: string;
 }
 

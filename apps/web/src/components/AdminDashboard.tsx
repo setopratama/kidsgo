@@ -28,6 +28,7 @@ interface PlayerItem {
   avatar: string;
   grade: string;
   current_xp: number;
+  is_suspended?: boolean;
   created_at: string;
 }
 
@@ -63,8 +64,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   // Players State
   const [players, setPlayers] = useState<PlayerItem[]>([]);
   const [selectedPlayerForReset, setSelectedPlayerForReset] = useState<PlayerItem | null>(null);
+  const [selectedPlayerForSuspend, setSelectedPlayerForSuspend] = useState<PlayerItem | null>(null);
+  const [playerSearchQuery, setPlayerSearchQuery] = useState('');
+  const [playerStatusFilter, setPlayerStatusFilter] = useState<'all' | 'active' | 'suspended'>('all');
+  const [playerGradeFilter, setPlayerGradeFilter] = useState<string>('all');
   const [newPlayerPin, setNewPlayerPin] = useState('');
   const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [isProcessingSuspend, setIsProcessingSuspend] = useState(false);
 
   // Leaderboard State
   const [leaderboard, setLeaderboard] = useState<
@@ -342,6 +348,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     }
   };
 
+  // Handle Suspend / Unsuspend Akun Murid
+  const handleToggleSuspend = async (player: PlayerItem) => {
+    setIsProcessingSuspend(true);
+    const targetSuspended = !player.is_suspended;
+    try {
+      const res = await fetch(`/api/admin/players/${player.id}/suspend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ isSuspended: targetSuspended }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setResetMessage(
+          targetSuspended
+            ? `🚫 Akun ${player.nickname} berhasil ditangguhkan (suspend). Sesi aktif telah diakhiri.`
+            : `✅ Akun ${player.nickname} berhasil diaktifkan kembali!`
+        );
+        fetchPlayers();
+      } else {
+        setResetMessage(`❌ Gagal: ${data.message}`);
+      }
+    } catch (err: unknown) {
+      setResetMessage(`❌ Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsProcessingSuspend(false);
+      setSelectedPlayerForSuspend(null);
+    }
+  };
+
   // Handle Ganti PIN Admin
   const handleChangeAdminPin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -397,14 +433,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     const active = questions.filter((q) => q.status === 'active').length;
     const draft = questions.filter((q) => q.status === 'draft').length;
     const approved = questions.filter((q) => q.status === 'approved').length;
+    const activePlayers = players.filter((p) => !p.is_suspended).length;
+    const suspendedPlayers = players.filter((p) => p.is_suspended).length;
     return {
       total: totalQuestions || questions.length,
       active,
       draft,
       approved,
       playersCount: players.length,
+      activePlayers,
+      suspendedPlayers,
     };
   }, [questions, totalQuestions, players]);
+
+  // Filtered Players dengan Search & Status
+  const filteredPlayers = useMemo(() => {
+    return players.filter((p) => {
+      if (playerSearchQuery.trim()) {
+        const q = playerSearchQuery.toLowerCase();
+        if (!p.nickname.toLowerCase().includes(q) && !p.grade.toLowerCase().includes(q)) {
+          return false;
+        }
+      }
+      if (playerStatusFilter === 'active' && p.is_suspended) return false;
+      if (playerStatusFilter === 'suspended' && !p.is_suspended) return false;
+      if (playerGradeFilter !== 'all' && p.grade !== playerGradeFilter) return false;
+      return true;
+    });
+  }, [players, playerSearchQuery, playerStatusFilter, playerGradeFilter]);
 
   // Statistik Distribusi per Jenjang
   const levelStats = useMemo(() => {
@@ -1352,7 +1408,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                     {stats.playersCount} Anak
                   </div>
                   <div style={{ fontSize: '0.75rem', color: '#0284C7', marginTop: '4px', fontWeight: 600 }}>
-                    Akun aktif dengan PIN →
+                    {stats.activePlayers} Aktif • {stats.suspendedPlayers} Ditangguhkan →
                   </div>
                 </div>
               </div>
@@ -2030,17 +2086,131 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
               <div
                 style={{
                   backgroundColor: '#FFFFFF',
+                  padding: '20px 24px',
+                  borderRadius: '12px',
+                  border: '1px solid #E2E8F0',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '12px',
+                }}
+              >
+                <div>
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1E293B', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    Daftar Murid Terdaftar ({players.length})
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', backgroundColor: '#DCFCE7', color: '#15803D' }}>
+                      {stats.activePlayers} Aktif
+                    </span>
+                    {stats.suspendedPlayers > 0 && (
+                      <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', backgroundColor: '#FEE2E2', color: '#B91C1C' }}>
+                        {stats.suspendedPlayers} Ditangguhkan
+                      </span>
+                    )}
+                  </h3>
+                  <p style={{ fontSize: '0.8125rem', color: '#64748B', marginTop: '4px' }}>
+                    Kelola data murid, tangguhkan akun (suspend) untuk keamanan atau pembatasan akses, serta reset PIN 4-digit secara instan.
+                  </p>
+                </div>
+              </div>
+
+              {/* Toolbar Pencarian & Filter Status Akun */}
+              <div
+                style={{
+                  backgroundColor: '#FFFFFF',
                   padding: '16px 20px',
                   borderRadius: '12px',
                   border: '1px solid #E2E8F0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  flexWrap: 'wrap',
                 }}
               >
-                <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1E293B' }}>
-                  Daftar Murid Terdaftar ({players.length})
-                </h3>
-                <p style={{ fontSize: '0.8125rem', color: '#64748B', marginTop: '2px' }}>
-                  Jika murid lupa 4-digit PIN rahasianya, guru atau admin dapat melakukan reset PIN secara instan.
-                </p>
+                {/* Kotak Pencarian */}
+                <div style={{ flex: 1, minWidth: '220px', position: 'relative' }}>
+                  <input
+                    type="text"
+                    value={playerSearchQuery}
+                    onChange={(e) => setPlayerSearchQuery(e.target.value)}
+                    placeholder="🔍 Cari nickname atau kelas..."
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '0.875rem',
+                      outline: 'none',
+                    }}
+                  />
+                  {playerSearchQuery && (
+                    <button
+                      onClick={() => setPlayerSearchQuery('')}
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#94A3B8',
+                        cursor: 'pointer',
+                        fontSize: '0.875rem',
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter Status Akun */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#475569' }}>Status:</label>
+                  <select
+                    value={playerStatusFilter}
+                    onChange={(e) => setPlayerStatusFilter(e.target.value as 'all' | 'active' | 'suspended')}
+                    style={{
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '0.875rem',
+                      backgroundColor: '#FFFFFF',
+                      fontWeight: 600,
+                      color: '#1E293B',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="all">Semua Status ({players.length})</option>
+                    <option value="active">✓ Hanya Aktif ({stats.activePlayers})</option>
+                    <option value="suspended">🚫 Hanya Ditangguhkan ({stats.suspendedPlayers})</option>
+                  </select>
+                </div>
+
+                {/* Filter Jenjang Kelas */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#475569' }}>Kelas:</label>
+                  <select
+                    value={playerGradeFilter}
+                    onChange={(e) => setPlayerGradeFilter(e.target.value)}
+                    style={{
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #CBD5E1',
+                      fontSize: '0.875rem',
+                      backgroundColor: '#FFFFFF',
+                      fontWeight: 600,
+                      color: '#1E293B',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="all">Semua Jenjang</option>
+                    {EDUCATION_LEVELS.map((lvl) => (
+                      <option key={lvl.code} value={lvl.code}>
+                        {lvl.name} ({lvl.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {resetMessage && (
@@ -2072,56 +2242,176 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                       <th style={{ padding: '12px 18px', fontWeight: 800 }}>NAMA ANAK / NICKNAME</th>
                       <th style={{ padding: '12px 18px', fontWeight: 800 }}>JENJANG KELAS</th>
                       <th style={{ padding: '12px 18px', fontWeight: 800 }}>PENGALAMAN (XP)</th>
+                      <th style={{ padding: '12px 18px', fontWeight: 800 }}>STATUS AKUN</th>
                       <th style={{ padding: '12px 18px', fontWeight: 800 }}>TANGGAL MENDAFTAR</th>
-                      <th style={{ padding: '12px 18px', fontWeight: 800, textAlign: 'right' }}>BANTUAN PIN</th>
+                      <th style={{ padding: '12px 18px', fontWeight: 800, textAlign: 'right' }}>AKSI KELOLA</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {players.map((p) => (
-                      <tr key={p.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                        <td style={{ padding: '14px 18px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span style={{ fontSize: '1.5rem' }}>{p.avatar}</span>
-                            <span style={{ fontWeight: 800, color: '#1E293B' }}>{p.nickname}</span>
+                    {filteredPlayers.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} style={{ padding: '40px 20px', textAlign: 'center', color: '#64748B' }}>
+                          <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🔍</div>
+                          <div style={{ fontWeight: 700, color: '#1E293B' }}>Tidak ada murid yang ditemukan</div>
+                          <div style={{ fontSize: '0.8125rem', marginTop: '4px' }}>
+                            Coba ubah kata kunci pencarian atau sesuaikan filter status dan jenjang.
                           </div>
                         </td>
-                        <td style={{ padding: '14px 18px' }}>
-                          <span style={{ padding: '4px 8px', backgroundColor: '#F1F5F9', borderRadius: '6px', fontWeight: 700 }}>
-                            {p.grade}
-                          </span>
-                        </td>
-                        <td style={{ padding: '14px 18px', fontWeight: 800, color: '#D97706' }}>
-                          ⭐ {p.current_xp} XP
-                        </td>
-                        <td style={{ padding: '14px 18px', color: '#64748B', fontSize: '0.8125rem' }}>
-                          {new Date(p.created_at).toLocaleDateString('id-ID', {
-                            day: 'numeric',
-                            month: 'short',
-                            year: 'numeric',
-                          })}
-                        </td>
-                        <td style={{ padding: '14px 18px', textAlign: 'right' }}>
-                          <button
-                            onClick={() => {
-                              setSelectedPlayerForReset(p);
-                              setResetMessage(null);
-                            }}
+                      </tr>
+                    ) : (
+                      filteredPlayers.map((p) => {
+                        const isSuspended = !!p.is_suspended;
+                        return (
+                          <tr
+                            key={p.id}
                             style={{
-                              padding: '6px 14px',
-                              backgroundColor: '#EFF6FF',
-                              border: '1px solid #BFDBFE',
-                              color: '#2563EB',
-                              borderRadius: '6px',
-                              fontSize: '0.75rem',
-                              fontWeight: 700,
-                              cursor: 'pointer',
+                              borderBottom: '1px solid #F1F5F9',
+                              backgroundColor: isSuspended ? '#FFF5F5' : 'transparent',
                             }}
                           >
-                            Reset PIN 🔑
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                            <td style={{ padding: '14px 18px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span style={{ fontSize: '1.5rem', filter: isSuspended ? 'grayscale(0.8)' : 'none' }}>
+                                  {p.avatar}
+                                </span>
+                                <div>
+                                  <span
+                                    style={{
+                                      fontWeight: 800,
+                                      color: isSuspended ? '#991B1B' : '#1E293B',
+                                      textDecoration: isSuspended ? 'line-through' : 'none',
+                                    }}
+                                  >
+                                    {p.nickname}
+                                  </span>
+                                  {isSuspended && (
+                                    <div style={{ fontSize: '0.6875rem', color: '#DC2626', fontWeight: 600 }}>
+                                      Akses Dinonaktifkan
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td style={{ padding: '14px 18px' }}>
+                              <span style={{ padding: '4px 8px', backgroundColor: '#F1F5F9', borderRadius: '6px', fontWeight: 700 }}>
+                                {p.grade}
+                              </span>
+                            </td>
+                            <td style={{ padding: '14px 18px', fontWeight: 800, color: '#D97706' }}>
+                              ⭐ {p.current_xp} XP
+                            </td>
+                            <td style={{ padding: '14px 18px' }}>
+                              {isSuspended ? (
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '4px 10px',
+                                    backgroundColor: '#FEE2E2',
+                                    color: '#B91C1C',
+                                    borderRadius: '999px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 800,
+                                    border: '1px solid #FECACA',
+                                  }}
+                                >
+                                  🚫 Ditangguhkan
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '4px 10px',
+                                    backgroundColor: '#DCFCE7',
+                                    color: '#15803D',
+                                    borderRadius: '999px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 800,
+                                    border: '1px solid #BBF7D0',
+                                  }}
+                                >
+                                  ✓ Aktif
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ padding: '14px 18px', color: '#64748B', fontSize: '0.8125rem' }}>
+                              {new Date(p.created_at).toLocaleDateString('id-ID', {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric',
+                              })}
+                            </td>
+                            <td style={{ padding: '14px 18px', textAlign: 'right' }}>
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', alignItems: 'center' }}>
+                                <button
+                                  onClick={() => {
+                                    setSelectedPlayerForReset(p);
+                                    setResetMessage(null);
+                                  }}
+                                  style={{
+                                    padding: '6px 12px',
+                                    backgroundColor: '#EFF6FF',
+                                    border: '1px solid #BFDBFE',
+                                    color: '#2563EB',
+                                    borderRadius: '6px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                  }}
+                                  title="Reset PIN murid jika lupa"
+                                >
+                                  Reset PIN 🔑
+                                </button>
+                                {isSuspended ? (
+                                  <button
+                                    onClick={() => {
+                                      setSelectedPlayerForSuspend(p);
+                                      setResetMessage(null);
+                                    }}
+                                    style={{
+                                      padding: '6px 12px',
+                                      backgroundColor: '#F0FDF4',
+                                      border: '1px solid #BBF7D0',
+                                      color: '#16A34A',
+                                      borderRadius: '6px',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                    title="Aktifkan kembali akun murid"
+                                  >
+                                    Aktifkan 🟢
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => {
+                                      setSelectedPlayerForSuspend(p);
+                                      setResetMessage(null);
+                                    }}
+                                    style={{
+                                      padding: '6px 12px',
+                                      backgroundColor: '#FEF2F2',
+                                      border: '1px solid #FECACA',
+                                      color: '#DC2626',
+                                      borderRadius: '6px',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                    title="Tangguhkan akun murid dan putus sesi aktif"
+                                  >
+                                    Suspend 🚫
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -2214,6 +2504,133 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                         </button>
                       </div>
                     </form>
+                  </div>
+                </div>
+              )}
+
+              {/* Modal Dialog Konfirmasi Suspend / Unsuspend */}
+              {selectedPlayerForSuspend && (
+                <div
+                  style={{
+                    position: 'fixed',
+                    inset: 0,
+                    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 100000,
+                    padding: '20px',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '100%',
+                      maxWidth: '440px',
+                      padding: '24px',
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: '16px',
+                      boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '16px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div
+                        style={{
+                          width: '44px',
+                          height: '44px',
+                          borderRadius: '12px',
+                          backgroundColor: selectedPlayerForSuspend.is_suspended ? '#DCFCE7' : '#FEE2E2',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '1.5rem',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {selectedPlayerForSuspend.is_suspended ? '🟢' : '🚫'}
+                      </div>
+                      <div>
+                        <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1E293B', margin: 0 }}>
+                          {selectedPlayerForSuspend.is_suspended
+                            ? `Aktifkan Kembali Akun Murid?`
+                            : `Tangguhkan Akun Murid?`}
+                        </h3>
+                        <p style={{ fontSize: '0.8125rem', color: '#64748B', margin: '2px 0 0' }}>
+                          Murid: <strong>{selectedPlayerForSuspend.nickname}</strong> {selectedPlayerForSuspend.avatar} ({selectedPlayerForSuspend.grade})
+                        </p>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        padding: '12px 14px',
+                        backgroundColor: '#F8FAFC',
+                        borderRadius: '8px',
+                        border: '1px solid #E2E8F0',
+                        fontSize: '0.8125rem',
+                        color: '#475569',
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {selectedPlayerForSuspend.is_suspended ? (
+                        <>
+                          Jika diaktifkan kembali, murid <strong>{selectedPlayerForSuspend.nickname}</strong> akan dapat login lagi menggunakan PIN miliknya, melanjutkan materi pelajaran, dan nilainya akan kembali ditampilkan di Papan Peringkat (Leaderboard).
+                        </>
+                      ) : (
+                        <>
+                          Jika ditangguhkan, murid <strong>{selectedPlayerForSuspend.nickname}</strong> tidak akan dapat masuk ke aplikasi. Seluruh sesi aktif murid akan langsung <strong>diputus (logout paksa)</strong> dan namanya disembunyikan sementara dari Papan Peringkat (Leaderboard).
+                        </>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPlayerForSuspend(null)}
+                        disabled={isProcessingSuspend}
+                        style={{
+                          flex: 1,
+                          padding: '10px',
+                          backgroundColor: '#F1F5F9',
+                          border: '1px solid #CBD5E1',
+                          borderRadius: '8px',
+                          fontWeight: 700,
+                          cursor: isProcessingSuspend ? 'not-allowed' : 'pointer',
+                          color: '#475569',
+                        }}
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSuspend(selectedPlayerForSuspend)}
+                        disabled={isProcessingSuspend}
+                        style={{
+                          flex: 1.2,
+                          padding: '10px',
+                          backgroundColor: selectedPlayerForSuspend.is_suspended ? '#16A34A' : '#DC2626',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          fontWeight: 800,
+                          cursor: isProcessingSuspend ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        {isProcessingSuspend ? (
+                          'Memproses...'
+                        ) : selectedPlayerForSuspend.is_suspended ? (
+                          'Ya, Aktifkan Kembali'
+                        ) : (
+                          'Ya, Tangguhkan Akun'
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
